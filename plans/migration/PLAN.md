@@ -2,15 +2,15 @@
 
 ## Current checkpoint
 
-**26 November 2026. Tommy chose `tjdevkit/tjterm` for the setup-only first merge.** TJ Term is the product and `tj` is the executable. The existing installation supplies the daily command during development.
+**26 November 2026. The setup change is [PR #1](https://github.com/tjdevkit/tjterm/pull/1).** TJ Term is the product and `tj` is the executable. The existing installation supplies the daily command during development.
 
-| Change | Scope | Next action |
+| Change | Delivered scope | Next fresh context |
 | --- | --- | --- |
-| `setup/scaffold` | Clean history, README, this plan, shared contributor instructions, pinned Python tooling and scaffold CI | Publish the nine-file change to the fresh public repository. Verify GitHub's Ubuntu and Windows runs and record the merged PR. Start a fresh context before the first runtime investigation. |
+| Setup PR #1 | Nine files covering shared contributor instructions, a pinned Python development environment, this plan and scaffold CI | Verify the merged PR and its final checks. Reproduce one selected plugin update from revision A to B with an unchanged control. Record the first difference between selection, installed files and behaviour in the running host. |
 
-On Arch Linux, a fresh clone passed the locked environment sync with Python 3.12.16 and uv 0.13.7, the Ruff configuration check, the contributor symlink and plan checks, and workflow linting. The hosted runs and merge are pending.
+On Arch Linux, a fresh clone passed the locked environment sync with Python 3.12.16 and uv 0.13.7, the Ruff configuration check, the contributor symlink and plan checks, and workflow linting. GitHub's Ubuntu and Windows jobs both passed on scaffold revision `4b852c6`. The PR records the merge commit and the checks on the final revision. [Hosted scaffold checks](https://github.com/tjdevkit/tjterm/actions/runs/45877677855) · [Setup PR](https://github.com/tjdevkit/tjterm/pull/1)
 
-This file is the project handoff. Each new context reads the root `AGENTS.md`, checks this section against Git and CI, and resumes the single agreed stage. At a major merge, record the PR or commit, the tested build, the platform and provider versions, what worked, what was discarded and the next action. Only the setup work is authorised at this checkpoint.
+This file is the project handoff. Each new context reads the root `AGENTS.md`, checks this section against Git and CI, and resumes the single agreed stage. At a major merge, record the PR or commit, the tested build, the platform and provider versions, what worked, what was discarded and the next action. Keep runtime imports for a separate review after the investigation.
 
 ## First merge
 
@@ -56,6 +56,8 @@ The existing implementations below are candidates. Port a component when a user 
 | Sync Tommy's machine or project policy | The installer also provisions shell profiles, Codex lanes, other tools and command bindings. Personal adoption can generate preferred instructions and configure identity. | Keep machine sync opt-in under Tommy's control. Let each repo select work or personal rules. Use checked-in Markdown for ordinary guidance. A plugin earns its place for reusable packaging, native discovery or executable integration. |
 
 An account or checkout path cannot determine the user's preferred standard or tracker. Keep the same authored rules across hosts wherever possible. A runtime operation needed for correctness must work when no agent reads a skill.
+
+Project setup should remember a developer's explicit choices across worktrees. The first push here exposed two independent prerequisites for the optional publishing profile. GitHub had to grant the selected App access to this repository, and the local Git helper had to recognise its owner. Check both when configuring a publishing destination, show which one needs attention and reuse the verified setup on subsequent pushes. Opening or resuming a local session requires neither publishing permission.
 
 ## First investigation after setup
 
