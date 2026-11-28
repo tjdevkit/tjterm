@@ -1,2 +1,2 @@
 class TjenticError(Exception):
-    """A TJentic request cannot safely be completed."""
+    """A recovery request cannot safely be completed."""
