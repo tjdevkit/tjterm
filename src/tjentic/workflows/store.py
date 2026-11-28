@@ -1,12 +1,12 @@
 import hashlib
 import json
 import sqlite3
-import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 from tjentic.errors import TjenticError
+from tjentic.locking import exclusive
 
 _SCHEMA = Path(__file__).with_name("schema.sql").read_text(encoding="utf-8")
 
@@ -50,19 +50,9 @@ def database(path: Path) -> Iterator[sqlite3.Connection]:
 def claim(path: Path, name: str) -> Iterator[None]:
     """Serialize foreground changes to one item. The OS releases this lock on exit."""
     key = hashlib.sha256(name.encode()).hexdigest()
-    with (path / f"{key}.lock").open("a+b") as lock:
-        try:
-            if sys.platform == "win32":
-                import msvcrt
-
-                lock.seek(0)
-                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as error:
-            raise TjenticError(f"Workflow item {name!r} is busy.") from error
+    with exclusive(
+        path / f"{key}.lock", busy_message=f"Workflow item {name!r} is busy."
+    ):
         yield
 
 
