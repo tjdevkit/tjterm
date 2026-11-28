@@ -345,7 +345,7 @@ wheels = [
 ]
 
 [[package]]
-name = "tjterm"
+name = "tjentic"
 version = "0.0.0"
 source = { editable = "." }
 

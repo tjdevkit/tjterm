@@ -1,12 +1,12 @@
 [project]
-name = "tjterm"
+name = "tjentic"
 version = "0.0.0"
 description = "Terminal tooling for Claude Code and Codex"
 requires-python = ">=3.12"
 dependencies = []
 
 [project.scripts]
-tj = "tjterm.cli:main"
+tj = "tjentic.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.13.1,<0.14"]

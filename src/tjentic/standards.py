@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
-from tjterm.errors import TjtermError
+from tjentic.errors import TjenticError
 
 _BEGIN = "<!-- tjentic:standards:start -->"
 _END = "<!-- tjentic:standards:end -->"
@@ -32,7 +32,7 @@ _GIT_REDIRECTIONS = frozenset(
 )
 
 
-class StandardsError(TjtermError):
+class StandardsError(TjenticError):
     """A project cannot safely synchronize its selected standards."""
 
 
