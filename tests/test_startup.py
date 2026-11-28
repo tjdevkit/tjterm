@@ -85,7 +85,29 @@ def checkout(tmp_path: Path) -> Path:
 
 
 def environment(checkout: Path) -> dict[str, str]:
-    return {"CLAUDE_CONFIG_DIR": str(checkout.parent / "profile"), "PATH": os.defpath}
+    profile = checkout.parent / "profile"
+    git_executable = shutil.which("git")
+    assert git_executable is not None
+    path = [str(Path(git_executable).parent), os.defpath]
+    system = {}
+    if os.name == "nt":
+        # Git for Windows launches its transport through a child process.
+        cmd = shutil.which("cmd.exe")
+        assert cmd is not None
+        system_dir = Path(cmd).parent
+        path.insert(1, str(system_dir))
+        system = {"SYSTEMROOT": str(system_dir.parent), "COMSPEC": cmd}
+    return {
+        **system,
+        "PATH": os.pathsep.join(path),
+        "TMP": str(checkout.parent),
+        "TEMP": str(checkout.parent),
+        "HOME": str(profile),
+        "CLAUDE_CONFIG_DIR": str(profile),
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_ALLOW_PROTOCOL": "file",
+    }
 
 
 def codex_fixture(
@@ -542,3 +564,36 @@ def test_floating_codex_package_requires_the_declared_remote_and_ref(
         verify(Host.CODEX, checkout, environment(checkout))
     git(plugin, "tag", "release", "HEAD")
     verify(Host.CODEX, checkout, environment(checkout))
+
+
+def test_claude_proof_verifies_the_selected_publisher_branch_offline(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    publisher = checkout.parent / "plugin"
+    first = git(publisher, "rev-parse", "HEAD")
+    git(publisher, "branch", "first", first)
+    git(publisher, "switch", "-c", "second")
+    (publisher / "team.rule").write_text("second", encoding="utf-8")
+    git(publisher, "add", ".")
+    git(publisher, "commit", "-qm", "other publisher branch")
+    git(publisher, "switch", "first")
+    market = checkout / ".claude-plugin/marketplace.json"
+    data = json.loads(market.read_bytes())
+    source = data["plugins"][0]["source"]
+    del source["sha"]
+    source["ref"] = "first"
+    save(market, data)
+    claude_fixture(checkout, monkeypatch, [checkout])
+    offline = {**environment(checkout), "GIT_ALLOW_PROTOCOL": ""}
+    verify(Host.CLAUDE, checkout, offline)
+
+    source["ref"] = "second"
+    save(market, data)
+    with pytest.raises(TjenticError, match="Missing publisher tree"):
+        verify(Host.CLAUDE, checkout, offline)
+    catalog = claude.selected(checkout, checkout)
+    assert catalog is not None
+    with pytest.raises(TjenticError, match="does not match publisher ref second"):
+        published_tree(catalog, IDENTITY, first, environment(checkout), acquire=True)
+    with pytest.raises(TjenticError, match="Missing publisher tree"):
+        verify(Host.CLAUDE, checkout, offline)
