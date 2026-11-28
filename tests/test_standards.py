@@ -8,6 +8,15 @@ from pathlib import Path
 import pytest
 
 from tjentic.cli import main
+from tjentic.sessions.hosts import Host
+
+
+@pytest.mark.parametrize("host", list(Host))
+def test_managed_launcher_selects_its_host_over_inherited_session_ids(
+    host: Host,
+) -> None:
+    environment = {other.session_variable: "inherited" for other in Host}
+    assert Host.current({**environment, "TJ_HOST": host.value}) is host
 
 
 def test_project_plugins_enable_pinned_python_and_rust_in_each_host() -> None:
