@@ -9,8 +9,15 @@ dependencies = []
 tj = "tjentic.cli:main"
 
 [build-system]
-requires = ["uv_build>=0.13.1,<0.14"]
-build-backend = "uv_build"
+requires = ["setuptools>=77", "setuptools-rust>=1.12"]
+build-backend = "setuptools.build_meta"
+
+[[tool.setuptools-rust.bins]]
+target = "tj-listener"
+path = "listener/Cargo.toml"
+
+[tool.setuptools.package-data]
+tjentic = ["py.typed", "workflows/*.sql", "watch/plugin/.claude-plugin/*.json", "watch/plugin/monitors/*.json"]
 
 [dependency-groups]
 dev = [
@@ -48,3 +55,11 @@ strict = true
 testpaths = ["tests"]
 addopts = ["--import-mode=importlib", "--disable-socket", "-ra"]
 filterwarnings = ["error"]
+
+[tool.uv]
+cache-keys = [
+    { file = "pyproject.toml" }, { file = "MANIFEST.in" },
+    { file = "listener/Cargo.toml" }, { file = "listener/Cargo.lock" },
+    { file = "listener/src/**/*.rs" }, { file = "listener/src/*.sql" },
+    { file = "src/tjentic/workflows/*.sql" },
+]

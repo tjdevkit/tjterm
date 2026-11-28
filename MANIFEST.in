@@ -1,0 +1,2 @@
+include listener/Cargo.toml listener/Cargo.lock listener/rust-toolchain.toml listener/clippy.toml listener/rustfmt.toml
+recursive-include listener/src *.rs *.sql

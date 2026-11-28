@@ -14,6 +14,7 @@ from tjentic.errors import TjenticError
 from tjentic.sessions import claude
 from tjentic.sessions.codex import Session, connect, terminal
 from tjentic.sessions.hosts import Host
+from tjentic.watch.native import Watch, listener_path
 from tjentic.workspaces import Workspace
 
 
@@ -123,6 +124,12 @@ def main(
     ):
         launcher = commands.add_parser(name, help=description)
         launcher.add_argument("--resume", type=UUID, metavar="SESSION_ID")
+    watch_parser = commands.add_parser(
+        "watch", help="receive actionable events for this native session"
+    )
+    watch_parser.add_argument(
+        "--once", action="store_true", help="return after the first event"
+    )
     transfer = commands.add_parser("handoff", help="give a task to a new agent tab")
     target = transfer.add_mutually_exclusive_group(required=True)
     target.add_argument("item", nargs="?", metavar="TASK")
@@ -202,25 +209,60 @@ def main(
                 Path.cwd(), apply=not args.dry_run, environment=os.environ
             )
             return 0
-        if args.command == "claude":
-            return claude.launch(Host.CLAUDE.command(), args.resume, os.environ)
-        if args.command == "codex":
+        if os.name == "nt":
+            state = os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local"
+            config = os.environ.get("APPDATA") or Path.home() / "AppData/Roaming"
+        else:
+            state = os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state"
+            config = os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
+        workflow_state = _product_file(Path(state), "workflows.sqlite3").parent
+        if args.command in {"codex", "claude", "watch"}:
+            host = (
+                Host.current(os.environ)
+                if args.command == "watch"
+                else Host(args.command)
+            )
+            workflow_state.mkdir(mode=0o700, parents=True, exist_ok=True)
+            watch = Watch(
+                host, workflow_state, host.profile(os.environ), listener_path()
+            )
+            watch.call("ensure")
+            if args.command == "watch":
+                try:
+                    owner = UUID(os.environ.get(host.session_variable, ""))
+                except ValueError as error:
+                    raise TjenticError(
+                        "Run tj watch inside a managed native session."
+                    ) from error
+                watch.call(
+                    "watch",
+                    "--host",
+                    host,
+                    "--profile",
+                    str(watch.profile),
+                    "--thread",
+                    str(owner),
+                    *(["--once"] if args.once else []),
+                )
+                return 0
+            if host == Host.CLAUDE:
+                return claude.launch(
+                    host.command(), args.resume, os.environ, watch=watch
+                )
             return asyncio.run(
-                terminal(codex_command or Host.CODEX.command(), args.resume, os.environ)
+                terminal(
+                    codex_command or host.command(),
+                    args.resume,
+                    os.environ,
+                    watch=watch,
+                )
             )
         if args.command in {"workflow", "handoff"}:
             import sqlite3
 
             from tjentic.workflows.runner import workflow
 
-            if os.name == "nt":
-                state = os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local"
-                config = os.environ.get("APPDATA") or Path.home() / "AppData/Roaming"
-            else:
-                state = os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state"
-                config = os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
             lanes = _product_file(Path(config), "lanes.toml")
-            workflow_state = _product_file(Path(state), "workflows.sqlite3").parent
             try:
                 if args.command == "handoff":
                     from tjentic.terminal import Kitty

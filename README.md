@@ -6,6 +6,14 @@ TJentic opens Claude Code or Codex in your terminal. This preview also finds sav
 
 From your project directory, run `tj claude` for Claude Code or `tj codex` for Codex. Each launcher uses that host's executable on your PATH, account, and settings. To reopen a Claude conversation, run `tj claude --resume SESSION_ID` in its project. Use `tj codex --resume SESSION_ID` to open a saved Codex conversation in its recorded directory with TJ's handoff instructions.
 
+## Wait for a linked pull request
+
+In `tj codex` or `tj claude`, ask the agent to finish a GitHub issue when its linked PR merges. Include the issue URL. When the PR is the sole remaining condition, the injected `watch_pull_request` tool reads the issue's closing links using your authenticated `gh` CLI and verifies the PR head against the checkout. It records the issue URL as the item name unless the session supplies an existing TJ item name.
+
+The Rust listener follows the PR after the terminal closes. Starting either managed launcher recovers outstanding waits. A merge of the accepted revision records one local closeout. A changed revision, changed link, or closed-unmerged PR leaves the item open and sends the owner a review event. Check the result in the item's worktree with `tj workflow status ITEM`. External issue updates and terminal cleanup are separate operations.
+
+Claude’s session plugin runs `tj watch` to receive events. On versions without plugin monitors the tool can arm a native background Bash subscription. Codex uses its native queue addressed to the recorded thread. Routine merges and unchanged CI use zero model requests. Source installations compile the bundled listener with Cargo and a C compiler. The wheel includes the listener.
+
 ## Recover a Codex session
 
 Install the preview with `uv tool install .` from a checkout, or run `uv run --locked tj --help` to try the checkout's environment. The command uses the developer's existing Codex CLI, account and native settings. Python 3.12 or newer is required.

@@ -169,7 +169,7 @@ async def _implemented(
 async def advance(db: sqlite3.Connection, name: str, command: Sequence[str]) -> None:
     while True:
         row = item(db, name)
-        if row["hold"] or row["phase"] in {"ready", "assigned"}:
+        if row["hold"] or row["phase"] in {"ready", "assigned", "closed"}:
             return
         if row["phase"] == "checking":
             raise TjenticError(
@@ -217,6 +217,16 @@ def status(db: sqlite3.Connection, name: str) -> dict[str, object]:
     result = dict(row)
     result["command"] = json.loads(row["command"])
     result["last_check"] = dict(check) if check else None
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name='pr_waits'").fetchone():
+        wait = db.execute("SELECT * FROM pr_waits WHERE item=?", (name,)).fetchone()
+        if wait:
+            result["pr_wait"] = dict(wait)
+            result["pr_decisions"] = [
+                dict(entry)
+                for entry in db.execute(
+                    "SELECT * FROM pr_decisions WHERE item=? ORDER BY id", (name,)
+                )
+            ]
     intake = db.execute(
         "SELECT i.task,d.state FROM intakes i JOIN deliveries d ON d.id=i.delivery "
         "WHERE i.name=?",

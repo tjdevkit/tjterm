@@ -87,7 +87,9 @@ def test_handoff_assigns_once_and_opens_the_recipient_with_the_task(
     assert terminal.open_tab.call_count == (2 if fail_first else 1)
     command = terminal.open_tab.call_args.args[2]
     assert command[2] == "tjentic.workflows.recipient"
-    assert command[5:] == ["codex", "resume", str(RECEIVER)]
+    assert command[5] == "codex"
+    assert any(arg.startswith("mcp_servers.tj_watch.command=") for arg in command)
+    assert command[-2:] == ["resume", str(RECEIVER)]
     host.create.assert_awaited_once()
     host.name.assert_awaited_once_with(RECEIVER, task)
     prompt = host.terminal_launch.await_args.args[3]

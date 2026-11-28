@@ -15,6 +15,7 @@ from uuid import UUID
 
 from tjentic.errors import TjenticError
 from tjentic.sessions.hosts import Host
+from tjentic.watch.native import Watch
 from tjentic.workspaces import Workspace
 
 
@@ -316,7 +317,6 @@ class Codex:
     ) -> TerminalLaunch:
         model_id = await self._model(model)
         args: tuple[str, ...] = (
-            "--no-daemon",
             "--cd",
             str(directory),
             "--model",
@@ -508,7 +508,11 @@ _HANDOFF_HINT = (
 
 
 async def terminal(
-    command: Sequence[str], identity: UUID | None, environment: Mapping[str, str]
+    command: Sequence[str],
+    identity: UUID | None,
+    environment: Mapping[str, str],
+    *,
+    watch: Watch | None = None,
 ) -> int:
     directory = Path.cwd()
     async with connect(command) as codex:
@@ -516,20 +520,29 @@ async def terminal(
             directory = (await codex.find(identity, workflow=True)).directory
             # Codex can replay the original startup instructions on exact resume.
             # Place the capability in the resumed context without starting a model turn.
-            await codex.acquire(identity, directory.resolve())
-            await codex.request(
-                "thread/inject_items",
-                {
-                    "threadId": str(identity),
-                    "items": [
-                        {
-                            "type": "message",
-                            "role": "developer",
-                            "content": [{"type": "input_text", "text": _HANDOFF_HINT}],
-                        }
-                    ],
-                },
-            )
+            try:
+                await codex.acquire(identity, directory.resolve())
+            except TjenticError as error:
+                # A managed TUI can attach to its already-loaded daemon thread.
+                # A second app-server process cannot acquire that thread's writer.
+                if watch is None or "already has an active writer" not in str(error):
+                    raise
+            else:
+                await codex.request(
+                    "thread/inject_items",
+                    {
+                        "threadId": str(identity),
+                        "items": [
+                            {
+                                "type": "message",
+                                "role": "developer",
+                                "content": [
+                                    {"type": "input_text", "text": _HANDOFF_HINT}
+                                ],
+                            }
+                        ],
+                    },
+                )
             args = ["resume"]
         else:
             response = await codex.request("config/read", {"cwd": str(directory)})
@@ -545,9 +558,13 @@ async def terminal(
                 "developer_instructions="
                 + json.dumps(instructions, ensure_ascii=False),
             ]
-    args.extend(["--no-daemon", "--cd", str(directory)])
+    if watch is None:
+        args.append("--no-daemon")
+    args.extend(["--cd", str(directory)])
     if identity is not None:
         args.append(str(identity))
+    if watch is not None:
+        args = [*watch.codex_config(directory), *args]
     process = await asyncio.create_subprocess_exec(
         *command, *args, cwd=directory, env={**environment, "TJ_HOST": Host.CODEX}
     )

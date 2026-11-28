@@ -10,6 +10,7 @@ from pathlib import Path
 from tjentic.errors import TjenticError
 from tjentic.sessions.history import SubmittedPrompt
 from tjentic.sessions.hosts import Host
+from tjentic.watch.native import Watch, listener_path
 from tjentic.workflows.checks import verify_tree, worktree
 from tjentic.workflows.handoff import assign_recipient, transfer
 from tjentic.workflows.store import claim, database, item
@@ -46,6 +47,10 @@ def run(
             submitted = prompt.visible()
             # A previous launch can leave a valid receipt before TJ could record it.
             argv = command[:-2] if submitted else command
+            watch = Watch(
+                provider, state, provider.profile(environment), listener_path()
+            )
+            watch.call("ensure")
             with subprocess.Popen(argv, cwd=directory, env=env) as child:
                 while not submitted:
                     try:
@@ -61,7 +66,12 @@ def run(
                         )
                 with db:
                     assign_recipient(
-                        db, request, request["receiver"], directory, provider
+                        db,
+                        request,
+                        request["receiver"],
+                        directory,
+                        provider,
+                        watch.profile,
                     )
                 return child.wait()
         except (OSError, TjenticError) as error:

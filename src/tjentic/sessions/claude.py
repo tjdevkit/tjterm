@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 from tjentic.errors import TjenticError
 from tjentic.sessions.hosts import Host
+from tjentic.watch.native import Watch
 
 
 class Model(StrEnum):
@@ -40,11 +41,19 @@ def arguments(session: UUID, *, resume: bool) -> list[str]:
 
 
 def launch(
-    command: Sequence[str], session_id: UUID | None, environment: Mapping[str, str]
+    command: Sequence[str],
+    session_id: UUID | None,
+    environment: Mapping[str, str],
+    *,
+    watch: Watch | None = None,
 ) -> int:
     identity = session_id or uuid4()
     result = subprocess.run(
-        [*command, *arguments(identity, resume=session_id is not None)],
+        [
+            *command,
+            *arguments(identity, resume=session_id is not None),
+            *(watch.claude_config(Path.cwd(), identity) if watch else []),
+        ],
         env={
             **environment,
             "TJ_HOST": Host.CLAUDE,

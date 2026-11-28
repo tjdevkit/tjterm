@@ -12,6 +12,7 @@ from tjentic.sessions import claude
 from tjentic.sessions.codex import connect
 from tjentic.sessions.hosts import Host
 from tjentic.terminal import Kitty
+from tjentic.watch.native import Watch, listener_path
 from tjentic.workflows.assignment import launch_assignment
 from tjentic.workflows.checks import verify_tree, worktree
 from tjentic.workflows.delivery import deliver_to
@@ -81,7 +82,11 @@ def offer(
 
 
 async def dispatch(
-    db: sqlite3.Connection, command: Sequence[str], request: sqlite3.Row, config: Path
+    db: sqlite3.Connection,
+    command: Sequence[str],
+    request: sqlite3.Row,
+    config: Path,
+    profile: Path | None = None,
 ) -> None:
     if request["state"] != "offered":
         return
@@ -138,10 +143,15 @@ async def dispatch(
                     (str(receiver.id), identity),
                 )
         reply = await deliver_to(db, codex, identity, new_thread=opened is not None)
-    record_decision(db, request, reply)
+    record_decision(db, request, reply, profile)
 
 
-def record_decision(db: sqlite3.Connection, request: sqlite3.Row, reply: str) -> None:
+def record_decision(
+    db: sqlite3.Connection,
+    request: sqlite3.Row,
+    reply: str,
+    profile: Path | None = None,
+) -> None:
     identity = request["id"]
     key = request["item"]
     with db:
@@ -154,6 +164,7 @@ def record_decision(db: sqlite3.Connection, request: sqlite3.Row, reply: str) ->
             )
             if cursor.rowcount != 1:
                 raise TjenticError("Item ownership changed before acceptance.")
+            rebind_watch(db, key, profile)
             action = str(uuid4())
             owner = item(db, key)
             prompt = (
@@ -266,6 +277,12 @@ async def open_recipient(
             "INSERT OR REPLACE INTO recipient_launches VALUES(?,?,?,?,?)",
             (identity, host.value, assignment, str(directory), str(history)),
         )
+    watch = Watch(host, state, host.profile(environment), listener_path())
+    options = (
+        watch.claude_config(directory, recipient)
+        if host is Host.CLAUDE
+        else watch.codex_config(directory)
+    )
     try:
         terminal.open_tab(
             directory,
@@ -277,6 +294,7 @@ async def open_recipient(
                 str(state),
                 identity,
                 *command,
+                *options,
                 *arguments,
             ],
             identity,
@@ -291,12 +309,28 @@ async def open_recipient(
         raise
 
 
+def rebind_watch(db: sqlite3.Connection, key: str, profile: Path | None) -> None:
+    if (
+        profile is None
+        or not db.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='pr_waits'"
+        ).fetchone()
+    ):
+        return
+    db.execute(
+        "UPDATE pr_waits SET thread=i.thread,host=i.host,profile=?,state='pending' "
+        "FROM items i WHERE i.id=pr_waits.item AND i.id=? AND state='rebind'",
+        (str(profile), key),
+    )
+
+
 def assign_recipient(
     db: sqlite3.Connection,
     request: sqlite3.Row,
     receiver: str,
     directory: Path,
     host: Host,
+    profile: Path | None = None,
 ) -> None:
     identity = request["id"]
     cursor = db.execute(
@@ -305,6 +339,7 @@ def assign_recipient(
     )
     if cursor.rowcount != 1:
         raise TjenticError("Item ownership changed before acceptance.")
+    rebind_watch(db, request["item"], profile)
     decided = db.execute(
         "UPDATE transfers SET receiver=?,state='accepted',detail=? "
         "WHERE id=? AND state='offered'",
@@ -321,6 +356,7 @@ async def accept_recipient(
     request: sqlite3.Row,
     caller: str | None,
     ticket: str | None,
+    profile: Path | None = None,
 ) -> None:
     identity = request["id"]
     if (
@@ -347,7 +383,7 @@ async def accept_recipient(
     if worktree(directory) != root:
         raise TjenticError("The recipient is in a different worktree.")
     with db:
-        assign_recipient(db, request, str(receiver.id), directory, Host.CODEX)
+        assign_recipient(db, request, str(receiver.id), directory, Host.CODEX, profile)
 
 
 async def handoff(
@@ -381,7 +417,12 @@ async def handoff(
                 request = transfer(db, str(saved))
                 if args.accept:
                     await accept_recipient(
-                        db, command or Host.CODEX.command(), request, caller, ticket
+                        db,
+                        command or Host.CODEX.command(),
+                        request,
+                        caller,
+                        ticket,
+                        Host.CODEX.profile(environment or {}),
                     )
                     print(f"Accepted {name}.\n\n{request['next_action']}")
                     return 0
@@ -442,7 +483,13 @@ async def handoff(
                         "SELECT 1 FROM deliveries WHERE id=?", (identity,)
                     ).fetchone()
                     if delivery:
-                        await dispatch(db, command or host.command(), request, config)
+                        await dispatch(
+                            db,
+                            command or host.command(),
+                            request,
+                            config,
+                            host.profile(environment or {}),
+                        )
                     elif legacy_tab:
                         print(f"The older recipient tab is still open for {name}.")
                         return 0

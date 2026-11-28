@@ -16,6 +16,14 @@ class Host(StrEnum):
     def session_variable(self) -> str:
         return "CODEX_THREAD_ID" if self is Host.CODEX else "CLAUDE_CODE_SESSION_ID"
 
+    def profile(self, environment: Mapping[str, str]) -> Path:
+        key = "CLAUDE_CONFIG_DIR" if self is Host.CLAUDE else "CODEX_HOME"
+        return (
+            Path(environment.get(key) or Path.home() / f".{self}")
+            .expanduser()
+            .resolve()
+        )
+
     @classmethod
     def current(cls, environment: Mapping[str, str]) -> Self:
         if environment.get("TJ_HOST") == cls.CLAUDE:
