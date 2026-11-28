@@ -140,7 +140,7 @@ fn serve(state: &Path, db: &mut Store) -> Result<()> {
             return Ok(());
         }
         thread::sleep(interval);
-        interval = (interval * 2).min(Duration::from_secs(120));
+        interval = (interval * 2).min(Duration::from_mins(2));
     }
 }
 

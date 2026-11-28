@@ -29,10 +29,20 @@ fn binding(host: &str) -> Binding<'_> {
     }
 }
 fn links(state: &str, revision: &str, count: u32) -> Links {
-    serde_json::from_value(json!({"totalCount":count,"nodes":[{"url":PR,"headRefOid":revision,"state":state,"mergeCommit":if state=="MERGED"{Some(json!({"oid":MERGE}))}else{None}}]})).unwrap()
+    let merge = (state == "MERGED").then(|| json!({ "oid": MERGE }));
+    serde_json::from_value(json!({
+        "totalCount": count,
+        "nodes": [{
+            "url": PR,
+            "headRefOid": revision,
+            "state": state,
+            "mergeCommit": merge,
+        }],
+    }))
+    .expect("deserialize the fixture PR links")
 }
 fn sql(path: &Path) -> Connection {
-    Connection::open(path.join("workflows.sqlite3")).unwrap()
+    Connection::open(path.join("workflows.sqlite3")).expect("open the fixture database")
 }
 
 #[test]
