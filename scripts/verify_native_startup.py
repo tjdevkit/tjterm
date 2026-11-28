@@ -13,10 +13,12 @@ import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from uuid import uuid4
 
 import pexpect
 from compression import zstd
 from native_project_switches import verify_project_switches
+from native_terminal import expect_refusal, submit
 
 PROMPT = "Verify the project's startup standards."
 
@@ -62,11 +64,28 @@ def occurrences(value: object, text: str) -> int:
     return 0
 
 
+def is_user_request(packet: object, prompt: str) -> bool:
+    if not isinstance(packet, dict):
+        return False
+    # Claude can quote the prompt in a separate request for a session title.
+    for message in packet.get("input", packet.get("messages", [])):
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        content = message.get("content", [])
+        if content == prompt or any(
+            isinstance(part, dict) and part.get("text") == prompt for part in content
+        ):
+            return True
+    return False
+
+
 class Capture(ThreadingHTTPServer):
     """Capture only model requests and stop each CLI before it can take any action."""
 
     def __init__(self) -> None:
         self.requests: list[object] = []
+        self.prompt = ""
+        self.prompt_received = threading.Event()
         super().__init__(("127.0.0.1", 0), Handler)
 
 
@@ -81,7 +100,10 @@ class Handler(BaseHTTPRequestHandler):
             case "zstd":
                 body = zstd.decompress(body)
         if self.path.partition("?")[0].endswith(("/messages", "/responses")):
-            self.server.requests.append(json.loads(body))
+            packet = json.loads(body)
+            self.server.requests.append(packet)
+            if self.server.prompt and is_user_request(packet, self.server.prompt):
+                self.server.prompt_received.set()
         self.send_response(400)
         self.end_headers()
         self.wfile.write(b'{"error":{"message":"end of local test"}}')
@@ -97,36 +119,37 @@ def check_request(
     excluded: dict[str, str] | None = None,
 ) -> None:
     server.requests.clear()
-    if host == "codex":
-        command = ["codex", "exec", "--json", PROMPT]
-    else:
-        command = [
-            "claude",
-            "-p",
-            "--model",
-            "claude-sonnet-4-5",
-            "--max-turns",
-            "1",
-            PROMPT,
-        ]
-    response = run(project, env, *command, check=False)
-    packets = [packet for packet in server.requests if occurrences(packet, PROMPT)]
-    if not packets:
-        raise RuntimeError(
-            f"{host} sent no user request from {project.name}: {response.stderr}"
-        )
-    counts = {name: occurrences(packets[0], rule) for name, rule in rules.items()}
+    server.prompt = f"{PROMPT} {uuid4().hex}"
+    server.prompt_received.clear()
+    submit(host, project, env, server.prompt, server.prompt_received)
+    packet = next(p for p in server.requests if is_user_request(p, server.prompt))
+    counts = {name: occurrences(packet, rule) for name, rule in rules.items()}
     if any(count != expected for count in counts.values()):
         raise AssertionError(
             f"{project.name} {host}: expected {expected} of each rule, got {counts}"
         )
     for name, rule in (excluded or {}).items():
-        if occurrences(packets[0], rule):
+        if occurrences(packet, rule):
             raise AssertionError(f"{project.name} {host}: unexpected rule from {name}")
     print(
         f"{host} in {project.name}: {len(rules)} rules with {expected} copies each, "
         f"{len(excluded or {})} other rules absent"
     )
+
+
+def check_blocked(
+    host: str,
+    project: Path,
+    env: dict[str, str],
+    server: Capture,
+    result: subprocess.CompletedProcess[str],
+) -> None:
+    if result.returncode == 0 or not result.stderr.strip():
+        raise AssertionError(f"{host} accepted an incomplete installation")
+    server.requests.clear()
+    expect_refusal(host, project, env, result.stderr)
+    if server.requests:
+        raise AssertionError(f"tj {host} contacted the model during a blocked launch")
 
 
 def review_fixture_hooks(project: Path, env: dict[str, str]) -> None:
@@ -203,8 +226,8 @@ def verify(root: Path, temp: Path, server: Capture, search_path: str) -> None:
         if not selected:
             continue
         command = ("tj", "plugins", "check", "--host", host)
-        if run(project, env, *command, check=False).returncode == 0:
-            raise AssertionError(f"{host} accepted missing standards")
+        status = run(project, env, *command, check=False)
+        check_blocked(host, project, env, server, status)
         run(project, env, "tj", "plugins", "update", "--host", host)
         reviewed = False
         if host == "codex":
@@ -212,6 +235,7 @@ def verify(root: Path, temp: Path, server: Capture, search_path: str) -> None:
             if status.returncode:
                 if "untrusted" not in status.stderr:
                     raise RuntimeError(status.stderr)
+                check_blocked(host, project, env, server, status)
                 review_fixture_hooks(project, env)
                 reviewed = True
         run(project, env, *command)
