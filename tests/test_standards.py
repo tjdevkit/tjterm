@@ -1,8 +1,5 @@
 import json
-import re
-import shutil
 import subprocess
-import tomllib
 from pathlib import Path
 
 import pytest
@@ -19,40 +16,31 @@ def test_managed_launcher_selects_its_host_over_inherited_session_ids(
     assert Host.current({**environment, "TJ_HOST": host.value}) is host
 
 
-def test_project_plugins_enable_pinned_python_and_rust_in_each_host() -> None:
-    root = Path(__file__).resolve().parents[1]
-    catalog = json.loads(
-        (root / ".claude-plugin/marketplace.json").read_text(encoding="utf-8")
+def test_each_host_uses_its_enabled_publisher_from_the_checkout(
+    editorial: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(editorial)
+    (editorial / ".claude/settings.json").write_text(
+        json.dumps({"enabledPlugins": {"voice@editorial": True}}), encoding="utf-8"
     )
-    assert catalog["name"] == "tjentic-project"
-    plugins = catalog["plugins"]
-    assert sorted(plugin["name"] for plugin in plugins) == ["python", "rust"]
-    for plugin in plugins:
-        name = plugin["name"]
-        source = plugin["source"]
-        assert source["source"] == "url"
-        assert source["url"] == f"https://github.com/tjentic/{name}-standards.git"
-        assert re.fullmatch("[0-9a-f]{40}", source["sha"])
-
-    expected = {f"{plugin['name']}@{catalog['name']}" for plugin in plugins}
-    claude = json.loads((root / ".claude/settings.json").read_text(encoding="utf-8"))
-    codex = tomllib.loads((root / ".codex/config.toml").read_text(encoding="utf-8"))
-    assert {
-        key for key, active in claude["enabledPlugins"].items() if active is True
-    } == expected
-    assert {
-        key for key, entry in codex["plugins"].items() if entry.get("enabled") is True
-    } == expected
+    (editorial / ".codex/config.toml").write_text(
+        '[plugins."captions@editorial"]\nenabled = true\n', encoding="utf-8"
+    )
+    for host, name, pin in [
+        ("claude", "voice", "2" * 40),
+        ("codex", "captions", "1" * 40),
+    ]:
+        assert main(["plugins", "update", "--host", host, "--dry-run"]) == 0
+        assert capsys.readouterr().out.splitlines() == [f"{name}@editorial {pin}"]
 
 
 def test_native_selection_from_linked_checkout_preserves_instruction_files(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    editorial: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    primary = tmp_path / "project"
-    root = Path(__file__).resolve().parents[1]
-    subprocess.run(["git", "init", "-q", str(primary)], check=True)
-    for folder in (".claude-plugin", ".claude", ".codex"):
-        shutil.copytree(root / folder, primary / folder)
+    primary = editorial
     notes = b"# Team notes\n"
     (primary / "AGENTS.md").write_bytes(notes)
     subprocess.run(["git", "add", "."], cwd=primary, check=True)
@@ -85,7 +73,11 @@ def test_native_selection_from_linked_checkout_preserves_instruction_files(
         monkeypatch.chdir(child)
         for host in ("codex", "claude"):
             assert main(["plugins", "update", "--dry-run", "--host", host]) == 0
-            assert "rust@tjentic-project" in capsys.readouterr().out
+            output = capsys.readouterr().out.splitlines()
+            assert [row.split()[0] for row in output] == [
+                "captions@editorial",
+                "voice@editorial",
+            ]
         assert instructions.read_bytes() == original
         instructions.write_bytes(
             original + b"<!-- tjentic:standards:start -->\nold rules\n"

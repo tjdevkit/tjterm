@@ -19,3 +19,7 @@ uv run --locked tj plugins update --help
 ```
 
 Verify the installed entry point when a change affects a provider or a user’s terminal.
+
+When implementing a generic requirement, treat named examples as test cases. During review, trace each restriction to the requirement or an upstream contract and exercise a valid case the request never named.
+
+For standards discovery, open two unrelated repositories with different plugin selections using the same native profile. Check the first request from the installed command against each repository’s selected publisher content.
