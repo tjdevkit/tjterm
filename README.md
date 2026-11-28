@@ -24,8 +24,8 @@ files = ["standards/convention/domain-design.md"]
 Omit `scope` for the worktree root. Give each scoped entry an existing directory in the worktree. Select a short set of rules so both clients have room for the project's own instructions.
 
 ```sh
-tj standards sync
-tj standards sync --apply
+tj plugins update
+tj plugins update --apply
 ```
 
 The first command shows a unified diff. `--apply` updates a marked section in each selected `AGENTS.md`. Review and commit the file and manifest together so teammates can use the text with their normal agent commands. Update a pin or file list and run sync again to refresh the section. Removing an entry clears its old section in tracked or unignored instruction files. An explicit empty `files` list can clear an ignored target while its scope is still selected.

@@ -87,25 +87,25 @@ def test_sync_previews_exact_commit_bytes_and_preserves_existing_guidance(
     claude.write_text("@AGENTS.md\n", encoding="utf-8")
     _configure(project, source, older, ["."])
 
-    assert main(["standards", "sync"]) == 0
+    assert main(["plugins", "update"]) == 0
     output = capsys.readouterr().out
     assert "+++ b/AGENTS.md" in output
     assert "+Use the pinned convention." in output
     assert "revised" not in output
     assert instructions.read_bytes() == team
 
-    assert main(["standards", "sync", "--apply"]) == 0
+    assert main(["plugins", "update", "--apply"]) == 0
     first = instructions.read_bytes()
     assert first.startswith(team)
     assert b"Use the pinned convention.\r\n" in first
     assert claude.read_text(encoding="utf-8") == "@AGENTS.md\n"
     capsys.readouterr()
-    assert main(["standards", "sync", "--apply"]) == 0
+    assert main(["plugins", "update", "--apply"]) == 0
     assert capsys.readouterr().out == "Project standards are up to date.\n"
     assert instructions.read_bytes() == first
 
     _configure(project, source, newer, ["."])
-    assert main(["standards", "sync", "--apply"]) == 0
+    assert main(["plugins", "update", "--apply"]) == 0
     assert b"Use the revised convention.\r\n" in instructions.read_bytes()
     assert b"Use the pinned convention." not in instructions.read_bytes()
     assert instructions.read_bytes().startswith(team)
@@ -124,12 +124,12 @@ def test_sync_removes_dropped_root_and_nested_sections(
     _configure(project, source, revision, [".", subtree.name])
     monkeypatch.chdir(subtree)
 
-    assert main(["standards", "sync", "--apply"]) == 0
+    assert main(["plugins", "update", "--apply"]) == 0
     assert b"Scope-specific policy." in root_agents.read_bytes()
     assert b"Scope-specific policy." in scoped_agents.read_bytes()
 
     _configure(project, source, revision, [])
-    assert main(["standards", "sync", "--apply"]) == 0
+    assert main(["plugins", "update", "--apply"]) == 0
     assert root_agents.read_bytes() == b"Root guidance\n"
     assert scoped_agents.read_bytes() == b"Scoped guidance\n"
 
@@ -139,7 +139,7 @@ def test_sync_rejects_invalid_scope_before_writing(
 ) -> None:
     revision = _commit(source, "Scope-specific policy.\n")
     _configure(project, source, revision, [".", "../other"])
-    assert main(["standards", "sync", "--apply"]) == 1
+    assert main(["plugins", "update", "--apply"]) == 1
     assert "worktree scope" in capsys.readouterr().err
     assert not (project / "AGENTS.md").exists()
 
@@ -152,6 +152,6 @@ def test_sync_refuses_incomplete_markers_without_writing(
     path = project / "AGENTS.md"
     original = b"# Team\n<!-- tjentic:standards:start -->\n"
     path.write_bytes(original)
-    assert main(["standards", "sync", "--apply"]) == 1
+    assert main(["plugins", "update", "--apply"]) == 1
     assert "Fix the standards markers" in capsys.readouterr().err
     assert path.read_bytes() == original

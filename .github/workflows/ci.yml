@@ -39,7 +39,7 @@ jobs:
       - run: uv run --locked mypy
       - run: uv run --locked pytest
       - run: uv build --wheel
-      - run: uv run --locked tj standards sync --help
+      - run: uv run --locked tj plugins update --help
       - name: Check the project against its pinned Python standards
         run: >-
           uv tool run --isolated --python 3.12

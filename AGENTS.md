@@ -17,7 +17,7 @@ uv run --locked ruff check
 uv run --locked mypy
 uv run --locked pytest
 uv build --wheel
-uv run --locked tj standards sync --help
+uv run --locked tj plugins update --help
 uv tool run --isolated --python 3.12 \
   --from git+https://github.com/tjentic/python-standards.git@8a3bf5a435227cfbc681d20e4a0286e7d8d30887 \
   check-python-standards --root .

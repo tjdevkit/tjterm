@@ -57,10 +57,12 @@ class _Edit:
 
 
 def add_command(commands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    standards = commands.add_parser("standards", help="manage project standards")
-    actions = standards.add_subparsers(dest="standards_action", required=True)
-    sync = actions.add_parser("sync", help="preview updates to project instructions")
-    sync.add_argument(
+    plugins = commands.add_parser("plugins", help="manage plugins")
+    actions = plugins.add_subparsers(dest="plugins_action", required=True)
+    update = actions.add_parser(
+        "update", help="preview updates to project instructions"
+    )
+    update.add_argument(
         "--apply", action="store_true", help="write the previewed changes"
     )
 
@@ -197,7 +199,7 @@ def _checkout_root(directory: Path, environment: Mapping[str, str] | None) -> Pa
     result = _git(
         directory,
         ("rev-parse", "--show-toplevel"),
-        "Run standards sync inside a Git worktree.",
+        "Run tj plugins update inside a Git worktree.",
         environment,
     )
     return Path(
