@@ -59,11 +59,9 @@ class _Edit:
 def add_command(commands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     plugins = commands.add_parser("plugins", help="manage plugins")
     actions = plugins.add_subparsers(dest="plugins_action", required=True)
-    update = actions.add_parser(
-        "update", help="preview updates to project instructions"
-    )
+    update = actions.add_parser("update", help="update project instructions")
     update.add_argument(
-        "--apply", action="store_true", help="write the previewed changes"
+        "--dry-run", action="store_true", help="show the diff without writing files"
     )
 
 

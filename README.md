@@ -25,10 +25,9 @@ Omit `scope` for the worktree root. Give each scoped entry an existing directory
 
 ```sh
 tj plugins update
-tj plugins update --apply
 ```
 
-The first command shows a unified diff. `--apply` updates a marked section in each selected `AGENTS.md`. Review and commit the file and manifest together so teammates can use the text with their normal agent commands. Update a pin or file list and run sync again to refresh the section. Removing an entry clears its old section in tracked or unignored instruction files. An explicit empty `files` list can clear an ignored target while its scope is still selected.
+The command updates a marked section in each selected `AGENTS.md`. Add `--dry-run` to see a unified diff before writing. Review and commit the file and manifest together so teammates can use the text with their normal agent commands. Update a pin or file list and run sync again to refresh the section. Removing an entry clears its old section in tracked or unignored instruction files. An explicit empty `files` list can clear an ignored target while its scope is still selected.
 
 Codex loads the section according to its usual scope and gives `AGENTS.override.md` precedence. Claude Code can use the same file through native discovery, an existing `CLAUDE.md` → `AGENTS.md` symlink, or a local `@AGENTS.md` import in a separately authored `CLAUDE.md`. Where Claude already uses `CLAUDE.md`, link or import the corresponding `AGENTS.md` at each scope Claude should read. Start in the relevant subtree when you need its rules on the first turn.
 

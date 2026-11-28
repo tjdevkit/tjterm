@@ -17,7 +17,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     standards.add_command(commands)
     args = parser.parse_args(argv)
     try:
-        standards.run_sync(Path.cwd(), apply=args.apply, environment=os.environ)
+        standards.run_sync(Path.cwd(), apply=not args.dry_run, environment=os.environ)
     except (OSError, standards.StandardsError) as error:
         print(f"tj: {error}", file=sys.stderr)
         return 1
