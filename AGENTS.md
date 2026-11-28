@@ -6,22 +6,21 @@ This file is the shared source of contributor instructions. Keep `CLAUDE.md` as 
 
 ## Python
 
-Use Python 3.12 or newer and manage dependencies with uv. Commit `uv.lock` when changing dependencies. Follow the pinned contributor standards for authored Python, including host adapters and scripts. The scaffold adopts their Ruff, mypy and pytest settings. [Python standards](https://github.com/tj-agents/python/tree/cd143949fb027ec30ed0267dfd37a76c5cc17910/.agents/python)
+Use Python 3.12 or newer and manage dependencies with uv. Commit `uv.lock` when changing dependencies. Follow the pinned contributor standards for authored Python, including host adapters and scripts. The project uses their Ruff, mypy and pytest settings. [Python standards](https://github.com/tjentic/python-standards/tree/8a3bf5a435227cfbc681d20e4a0286e7d8d30887/standards)
 
-Validate the scaffold with these commands.
+Validate authored Python with these commands.
 
 ```sh
 uv sync --locked
-uv run --locked ruff check pyproject.toml
-```
-
-When the first Python source arrives, add a test of its behaviour and enable these checks locally and in CI.
-
-```sh
 uv run --locked ruff format --check
 uv run --locked ruff check
 uv run --locked mypy
 uv run --locked pytest
+uv build --wheel
+uv run --locked tj plugins update --help
+uv tool run --isolated --python 3.12 \
+  --from git+https://github.com/tjentic/python-standards.git@8a3bf5a435227cfbc681d20e4a0286e7d8d30887 \
+  check-python-standards --root .
 ```
 
-Include the pinned house source checker with `--root .` in that change. Replace this temporary development pin with the independent Python standards release before retiring its existing publisher. Verify the installed entry point when a change affects a provider or a user's terminal. [House checker](https://github.com/tj-agents/python/blob/cd143949fb027ec30ed0267dfd37a76c5cc17910/.agents/python/utility/check/scripts/check_python.py)
+Verify the installed entry point when a change affects a provider or a user's terminal. [House checker](https://github.com/tjentic/python-standards/blob/8a3bf5a435227cfbc681d20e4a0286e7d8d30887/standards/tool/check-python-standards.md)
