@@ -85,7 +85,29 @@ def checkout(tmp_path: Path) -> Path:
 
 
 def environment(checkout: Path) -> dict[str, str]:
-    return {"CLAUDE_CONFIG_DIR": str(checkout.parent / "profile"), "PATH": os.defpath}
+    profile = checkout.parent / "profile"
+    system = {
+        key: os.environ[key]
+        for key in (
+            "PATH",
+            "SYSTEMROOT",
+            "WINDIR",
+            "COMSPEC",
+            "PATHEXT",
+            "TMP",
+            "TEMP",
+            "TMPDIR",
+        )
+        if key in os.environ
+    }
+    return {
+        **system,
+        "HOME": str(profile),
+        "CLAUDE_CONFIG_DIR": str(profile),
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_ALLOW_PROTOCOL": "file",
+    }
 
 
 def codex_fixture(
