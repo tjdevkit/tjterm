@@ -2,33 +2,29 @@
 
 TJentic is a terminal tool in development for working with Claude Code and Codex in your own projects. The first milestone is finding an unfinished conversation and resuming it in the Git worktree where you left it.
 
-The executable is `tj`. This preview can synchronize shared project standards.
+The executable is `tj`. Each Git checkout selects its own contributor plugins for Claude Code and Codex.
 
-## Synchronize project standards
+## Set up contributor plugins
 
-Add `.tjentic/standards.toml` to your Git worktree and select the Markdown files your team wants in its native agent instructions. Pin each source to a full Git commit. Sources can be HTTPS Git URLs or local checkout paths.
-
-```toml
-[[standards]]
-source = "https://github.com/tjentic/python-standards.git"
-revision = "8a3bf5a435227cfbc681d20e4a0286e7d8d30887"
-files = ["standards/convention/enums.md"]
-
-[[standards]]
-source = "https://github.com/tjentic/rust-standards.git"
-revision = "05374eac81ce4bfffbe89fb71deaf12fcfdde2c3"
-scope = "crates"
-files = ["standards/convention/domain-design.md"]
-```
-
-Omit `scope` for the worktree root. Give each scoped entry an existing directory in the worktree. Select a short set of rules so both clients have room for the project's own instructions.
+From the checkout you plan to work in, install its selected plugins for your host.
 
 ```sh
-tj plugins update
+tj plugins update --host codex
+tj plugins check --host codex
 ```
 
-The command updates a marked section in each selected `AGENTS.md`. Add `--dry-run` to see a unified diff before writing. Review and commit the file and manifest together so teammates can use the text with their normal agent commands. Update a pin or file list and run sync again to refresh the section. Removing an entry clears its old section in tracked or unignored instruction files. An explicit empty `files` list can clear an ignored target while its scope is still selected.
+For Claude Code, use `--host claude`. Use `--dry-run` with `update` to see the selected plugin IDs and any pinned revisions. In Codex, review the plugin commands through the native hook trust prompt or `/hooks`. Start a new session or resume the intended one after installation. A standards publisher supplies its session instructions through its native `SessionStart` hooks.
 
-Codex loads the section according to its usual scope and gives `AGENTS.override.md` precedence. Claude Code can use the same file through native discovery, an existing `CLAUDE.md` → `AGENTS.md` symlink, or a local `@AGENTS.md` import in a separately authored `CLAUDE.md`. Where Claude already uses `CLAUDE.md`, link or import the corresponding `AGENTS.md` at each scope Claude should read. Start in the relevant subtree when you need its rules on the first turn.
+### Project selection
+
+For a repository with its own marketplace, declare each plugin’s source and commit in `.claude-plugin/marketplace.json`. Enable its `plugin@marketplace` ID in the host settings for that repository (`.codex/config.toml` or `.claude/settings.json`). To add another standards publisher, add its entry and enable its ID. The publisher chooses which instructions its native `SessionStart` hook delivers. TJ checks the selection for the checkout where the session opens, including linked worktrees.
+
+A project can also use a publisher’s marketplace directly. It declares that source under `marketplaces` in Codex or `extraKnownMarketplaces` in Claude, then enables the corresponding plugin ID. This works in a repository with only the provider settings. For example, a writing project can select its own style plugin while a software project selects a different publisher in the same host profile. Run `tj plugins update --dry-run --host codex` in either checkout to see its selection. A pinned source gives the check an exact required revision. A floating Git source follows the publisher when updated. If the host profile already provides a Git-backed marketplace, the project can simply enable its plugin ID. TJ uses the marketplace revision available to that profile.
+
+### Personal standards
+
+A repository can adopt a personal standards plugin by selecting it the same way. Its rules then apply in that project. An individual can also enable a plugin in their own native profile. That is an account-level choice and may affect other projects using the same profile. TJ’s project check covers project-selected plugins. The migration plan tracks explicit private, user- or task-scoped policy separately. [Personal standards plugin](https://github.com/tjentic/personal-standards)
+
+Projects using the older Markdown updater should remove its delimited section from their instruction files when adopting these plugins. Keep handwritten instructions around that section. The old `.tjentic/standards.toml` selected individual documents. The selected plugin delivers the instructions maintained by its publisher.
 
 [Migration plan](plans/migration/PLAN.md) · [Contributor instructions](AGENTS.md)

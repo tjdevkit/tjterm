@@ -1,0 +1,23 @@
+{
+  "name": "tjentic-project",
+  "owner": { "name": "TJentic" },
+  "description": "Contributor plugins selected by the TJentic project.",
+  "plugins": [
+    {
+      "name": "python",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/tjentic/python-standards.git",
+        "sha": "d052afb82f6a400efe81d96dbced98f3ca985156"
+      }
+    },
+    {
+      "name": "rust",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/tjentic/rust-standards.git",
+        "sha": "35878ff95e48b7677e54f59e14e23049e54897ec"
+      }
+    }
+  ]
+}
