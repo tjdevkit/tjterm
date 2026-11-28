@@ -5,13 +5,13 @@ from collections.abc import Sequence
 from importlib.metadata import version
 from pathlib import Path
 
-from tjterm import standards
+from tjentic import standards
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="tj", description="TJentic")
     parser.add_argument(
-        "--version", action="version", version=f"tj {version('tjterm')}"
+        "--version", action="version", version=f"tj {version('tjentic')}"
     )
     commands = parser.add_subparsers(dest="command", required=True)
     standards.add_command(commands)

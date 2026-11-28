@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tjterm.cli import main
+from tjentic.cli import main
 
 
 def _git(root: Path, *arguments: str) -> str:
