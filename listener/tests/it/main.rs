@@ -54,6 +54,10 @@ fn simultaneous_recovery_after_offline_merge_records_one_closeout_for_each_host(
         old.execute_batch("CREATE TABLE items(name TEXT PRIMARY KEY,thread TEXT NOT NULL,directory TEXT NOT NULL,worktree TEXT NOT NULL,git_dir TEXT NOT NULL,command TEXT NOT NULL,phase TEXT NOT NULL,hold TEXT,last_error TEXT);")
             .unwrap();
         old.execute("INSERT INTO items VALUES('widget',?,'/work','/work','/work/.git','[]','assigned',NULL,NULL)",[THREAD]).unwrap();
+        if cfg!(windows) {
+            old.execute("UPDATE items SET git_dir=?", [r"\work\.git"])
+                .unwrap();
+        }
         {
             let mut store = Store::open(tmp.path()).unwrap();
             if host == "claude" {

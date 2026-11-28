@@ -95,7 +95,18 @@ impl Store {
             ON CONFLICT(worktree,name) DO NOTHING",
             params![b.item, b.thread, b.root, b.git_dir, b.host],
         )?;
-        let identity:String=tx.query_row("SELECT id FROM items WHERE name=? AND thread=? AND worktree=? AND git_dir=? AND host=?",params![b.item,b.thread,b.root,b.git_dir,b.host],|r|r.get(0)).optional()?.context("this item belongs to a different owner or worktree")?;
+        let (identity, git_dir): (String, String) = tx
+            .query_row(
+                "SELECT id,git_dir FROM items WHERE name=? AND thread=? AND worktree=? AND host=?",
+                params![b.item, b.thread, b.root, b.host],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .context("this item belongs to a different owner or worktree")?;
+        ensure!(
+            Path::new(&git_dir) == Path::new(b.git_dir),
+            "the registered Git directory for this item changed"
+        );
         tx.execute(
             "INSERT OR IGNORE INTO worktree_ids(item,device,inode) VALUES(?,?,?)",
             params![identity, b.device, b.inode],

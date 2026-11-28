@@ -24,16 +24,17 @@ def worktree(directory: Path) -> Path:
 
 def verify_tree(db: sqlite3.Connection, row: sqlite3.Row) -> Path:
     root = Path(row["worktree"])
+    directory = Path(row["git_dir"])
     if (
         worktree(root) != root
-        or git(root, "rev-parse", "--absolute-git-dir") != row["git_dir"]
+        or Path(git(root, "rev-parse", "--absolute-git-dir")) != directory
     ):
         raise TjenticError(f"The registered Git worktree at {root} changed.")
     identity = db.execute(
         "SELECT * FROM worktree_ids WHERE item=?", (row["id"],)
     ).fetchone()
     if identity:
-        metadata = Path(row["git_dir"]).stat()
+        metadata = directory.stat()
         if (str(metadata.st_dev), str(metadata.st_ino)) != (
             identity["device"],
             identity["inode"],
