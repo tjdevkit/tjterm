@@ -1,14 +1,14 @@
-# TJ Term migration plan
+# TJentic migration plan
 
 ## Current checkpoint
 
-**26 November 2026. The setup change is [PR #1](https://github.com/tjdevkit/tjterm/pull/1).** TJ Term is the product and `tj` is the executable. The existing installation supplies the daily command during development.
+**26 November 2026. The setup change is [PR #1](https://github.com/tjentic/tjentic/pull/1).** TJentic is the product and `tj` is the executable. The existing installation supplies the daily command during development.
 
 | Change | Delivered scope | Next fresh context |
 | --- | --- | --- |
 | Setup PR #1 | Nine files covering shared contributor instructions, a pinned Python development environment, this plan and scaffold CI | Verify the merged PR and its final checks. Reproduce one selected plugin update from revision A to B with an unchanged control. Record the first difference between selection, installed files and behaviour in the running host. |
 
-On Arch Linux, a fresh clone passed the locked environment sync with Python 3.12.16 and uv 0.13.7, the Ruff configuration check, the contributor symlink and plan checks, and workflow linting. GitHub's Ubuntu and Windows jobs both passed on scaffold revision `4b852c6`. The PR records the merge commit and the checks on the final revision. [Hosted scaffold checks](https://github.com/tjdevkit/tjterm/actions/runs/45877677855) · [Setup PR](https://github.com/tjdevkit/tjterm/pull/1)
+On Arch Linux, a fresh clone passed the locked environment sync with Python 3.12.16 and uv 0.13.7, the Ruff configuration check, the contributor symlink and plan checks, and workflow linting. GitHub's Ubuntu and Windows jobs both passed on scaffold revision `4b852c6`. The PR records the merge commit and the checks on the final revision. [Hosted scaffold checks](https://github.com/tjentic/tjentic/actions/runs/45877677855) · [Setup PR](https://github.com/tjentic/tjentic/pull/1)
 
 This file is the project handoff. Each new context reads the root `AGENTS.md`, checks this section against Git and CI, and resumes the single agreed stage. At a major merge, record the PR or commit, the tested build, the platform and provider versions, what worked, what was discarded and the next action. Keep runtime imports for a separate review after the investigation.
 
@@ -20,7 +20,7 @@ The first merge ends at project setup. Runtime code, installers, host configurat
 
 ## The developer's workflow
 
-| Tomorrow morning | Where the developer goes | What TJ Term must know |
+| Tomorrow morning | Where the developer goes | What TJentic must know |
 | --- | --- | --- |
 | Open the project | **Workspaces** | Resolve the Git repository and its linked worktrees. |
 | Find an unfinished change | **Work items**, filtered to that workspace | Show open items, their state and linked conversations. A board presents these same records and transitions. |
@@ -36,7 +36,7 @@ The existing implementations below are candidates. Port a component when a user 
 | Existing source | What it does today | Destination and reason |
 | --- | --- | --- |
 | CLI | Rust executable and launcher, transcript readers, directory search, process supervision, messages and completion receipts. Its Python package already exposes process and path operations to Agent. | Bring the session reader and exact directory evidence into Sessions first. Preserve the command contracts as each capability arrives. Assess folder jumps, shell shortcuts and other utilities individually. |
-| Agent | Managed Claude/Codex launch, session hooks, handoff, recovery, plugin selection, update and machine provisioning share an installer. | Put the provider-specific lifecycle operations behind the product commands. Package the minimum required bridge with TJ Term. Split selected plugin maintenance from machine provisioning. |
+| Agent | Managed Claude/Codex launch, session hooks, handoff, recovery, plugin selection, update and machine provisioning share an installer. | Put the provider-specific lifecycle operations behind the product commands. Package the minimum required bridge with TJentic. Split selected plugin maintenance from machine provisioning. |
 | Agent Store | SQLite records work items, launches, native session bindings and worktree claims. Host state supplies liveness. | Reuse the proven data model and transactional claims for Sessions and Work items. Retain compatibility with existing local records at cutover. A separate service adds no current requirement. |
 | Work Items | Shared tracker references, provider adapters and project-specific tracker profiles. | Put neutral operations and reference parsing under Work items. Exercise GitHub first. Bring across Azure DevOps when its workflow can be tested. An organisation's tracker policy belongs in its own profile. |
 | Core | Mixed development instructions, workflow rules and executable operations. The legacy item-start path calls the worktree creator through the enabled Base plugin. | Move the necessary Git operation to Workspaces. Keep planning, review and delegation preferences with their owner. |
@@ -46,7 +46,7 @@ The existing implementations below are candidates. Port a component when a user 
 
 ## Native hosts, standards and refresh
 
-**TJ Term should work in a plain repository with the user's own Claude or Codex account and zero personal plugins.** In the old code, a project without a plugin selection can skip standards checks and the CLI can search existing transcripts. Reliable managed binding and completion use Agent's lifecycle hooks, recovery uses its recorded bindings and working directory, and item-start needs the worktree creator from Base. The old full installer also pulls a private Work Items source. Treat a clean public install, independent launch and exact resume on each provider as acceptance tests for the replacement.
+**TJentic should work in a plain repository with the user's own Claude or Codex account and zero personal plugins.** In the old code, a project without a plugin selection can skip standards checks and the CLI can search existing transcripts. Reliable managed binding and completion use Agent's lifecycle hooks, recovery uses its recorded bindings and working directory, and item-start needs the worktree creator from Base. The old full installer also pulls a private Work Items source. Treat a clean public install, independent launch and exact resume on each provider as acceptance tests for the replacement.
 
 | Operation | Existing coupling | Direction |
 | --- | --- | --- |

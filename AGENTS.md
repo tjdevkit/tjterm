@@ -1,4 +1,4 @@
-# Working on TJ Term
+# Working on TJentic
 
 Start each new context at the checkpoint in the migration plan. Check the named change and its verification results. At each major merge, record what passed, what failed, what was removed and the next authorised action. [Migration plan](plans/migration/PLAN.md)
 
