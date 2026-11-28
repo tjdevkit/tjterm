@@ -14,7 +14,7 @@ uv run --locked ruff format --check
 uv run --locked ruff check
 uv run --locked mypy
 uv run --locked pytest
-uv build --wheel
+uv build
 uv run --locked tj plugins update --help
 ```
 

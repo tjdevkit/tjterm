@@ -44,7 +44,7 @@ jobs:
       - run: uv run --locked ruff check
       - run: uv run --locked mypy
       - run: uv run --locked pytest
-      - run: uv build --wheel
+      - run: uv build
       - run: uv run --locked tj --version
       - run: uv run --locked tj plugins update --help
       - name: Check the project against its pinned Python standards

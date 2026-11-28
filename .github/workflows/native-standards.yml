@@ -22,7 +22,7 @@ jobs:
           version: "0.13.7"
       - name: Install the wheel and pinned native clients
         run: |
-          uv build --wheel
+          uv build
           uv venv --python 3.12 "$RUNNER_TEMP/tj"
           uv pip install --python "$RUNNER_TEMP/tj/bin/python" --no-deps dist/*.whl
           npm install --prefix "$RUNNER_TEMP/clients" --no-audit --no-fund @openai/codex@0.172.0 @anthropic-ai/claude-code@2.1.296
