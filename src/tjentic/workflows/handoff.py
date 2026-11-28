@@ -9,10 +9,11 @@ from uuid import UUID, uuid4
 
 from tjentic.errors import TjenticError
 from tjentic.hosts.host import Host
+from tjentic.listener import listener_path
 from tjentic.sessions import claude
 from tjentic.sessions.codex import connect
 from tjentic.terminal import Kitty
-from tjentic.watch.native import Watch, listener_path
+from tjentic.watch.native import Watch
 from tjentic.workflows.assignment import launch_assignment
 from tjentic.workflows.checks import verify_tree, worktree
 from tjentic.workflows.delivery import deliver_to

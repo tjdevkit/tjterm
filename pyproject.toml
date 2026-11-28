@@ -60,6 +60,6 @@ filterwarnings = ["error"]
 cache-keys = [
     { file = "pyproject.toml" }, { file = "MANIFEST.in" },
     { file = "listener/Cargo.toml" }, { file = "listener/Cargo.lock" },
-    { file = "listener/src/**/*.rs" }, { file = "listener/src/*.sql" },
+    { file = "listener/src/**/*.rs" }, { file = "listener/src/**/*.sql" },
     { file = "src/tjentic/workflows/*.sql" },
 ]

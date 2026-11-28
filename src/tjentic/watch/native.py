@@ -1,15 +1,12 @@
 import json
-import os
 import subprocess
 import sys
-import sysconfig
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
 
 from tjentic.errors import TjenticError
 from tjentic.hosts.host import Host
-from tjentic.workflows.checks import git, worktree
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,8 +69,6 @@ class Watch:
         ]
 
     def register(self, session: UUID, directory: Path, item: str, issue: str) -> str:
-        directory = worktree(directory)
-        info = Path(git(directory, "rev-parse", "--absolute-git-dir")).stat()
         return self.call(
             "register",
             "--host",
@@ -84,18 +79,9 @@ class Watch:
             str(self.profile),
             "--directory",
             str(directory),
-            "--device",
-            str(info.st_dev),
-            "--inode",
-            str(info.st_ino),
             "--item",
             item,
             "--issue",
             issue,
             capture=True,
         )
-
-
-def listener_path() -> Path:
-    name = "tj-listener.exe" if os.name == "nt" else "tj-listener"
-    return Path(sysconfig.get_path("scripts")) / name

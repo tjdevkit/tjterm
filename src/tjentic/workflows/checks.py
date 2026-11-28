@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from tjentic.errors import TjenticError
+from tjentic.listener import Worktree
 from tjentic.workflows.store import latest_check
 
 
@@ -19,28 +20,16 @@ def git(directory: Path, *args: str) -> str:
 
 
 def worktree(directory: Path) -> Path:
-    return Path(git(directory, "rev-parse", "--show-toplevel")).resolve()
+    return Worktree.discover(directory).root
 
 
 def verify_tree(db: sqlite3.Connection, row: sqlite3.Row) -> Path:
-    root = Path(row["worktree"])
-    directory = Path(row["git_dir"])
-    if (
-        worktree(root) != root
-        or Path(git(root, "rev-parse", "--absolute-git-dir")) != directory
-    ):
-        raise TjenticError(f"The registered Git worktree at {root} changed.")
+    actual = Worktree.discover(Path(row["worktree"]))
     identity = db.execute(
-        "SELECT * FROM worktree_ids WHERE item=?", (row["id"],)
+        "SELECT device,inode FROM worktree_ids WHERE item=?", (row["id"],)
     ).fetchone()
-    if identity:
-        metadata = directory.stat()
-        if (str(metadata.st_dev), str(metadata.st_ino)) != (
-            identity["device"],
-            identity["inode"],
-        ):
-            raise TjenticError(f"The registered Git directory for {root} was replaced.")
-    return root
+    actual.verify(row, identity)
+    return actual.root
 
 
 def run_check(db: sqlite3.Connection, row: sqlite3.Row) -> None:

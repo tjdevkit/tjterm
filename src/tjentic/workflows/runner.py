@@ -6,9 +6,10 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from tjentic.errors import TjenticError
+from tjentic.listener import Worktree
 from tjentic.sessions.codex import connect
 from tjentic.workflows.assignment import launch_assignment
-from tjentic.workflows.checks import git, run_check, verify_tree, worktree
+from tjentic.workflows.checks import run_check, verify_tree, worktree
 from tjentic.workflows.delivery import deliver, deliver_to
 from tjentic.workflows.lanes import bind_launch, recorded, select
 from tjentic.workflows.store import claim_item, database, find_item, item, latest_check
@@ -26,8 +27,8 @@ async def bind(
     async with connect(command, environment=environment) as codex:
         session = await codex.find(thread, workflow=True)
     directory = session.directory.resolve()
-    root = worktree(directory)
-    if worktree(Path.cwd()) != root:
+    tree = Worktree.discover(directory)
+    if worktree(Path.cwd()) != tree.root:
         raise TjenticError("Start the item from its Codex session's worktree.")
     with db:
         return _bind(
@@ -35,7 +36,7 @@ async def bind(
             name,
             str(session.id),
             directory,
-            root,
+            tree,
             check,
             "check" if check else "assigned",
         )
@@ -49,9 +50,9 @@ def bind_worktree(
     thread: str = "",
     host: str = "codex",
 ) -> sqlite3.Row:
-    root = worktree(directory)
+    tree = Worktree.discover(directory)
     with db:
-        return _bind(db, name, thread, directory, root, [], "assigned", host=host)
+        return _bind(db, name, thread, directory, tree, [], "assigned", host=host)
 
 
 def _bind(
@@ -59,14 +60,12 @@ def _bind(
     name: str,
     thread: str,
     directory: Path,
-    root: Path,
+    tree: Worktree,
     check: list[str],
     phase: str,
     *,
     host: str = "codex",
 ) -> sqlite3.Row:
-    git_dir = git(root, "rev-parse", "--absolute-git-dir")
-    metadata = Path(git_dir).stat()
     identity = str(uuid4())
     cursor = db.execute(
         "INSERT INTO items(id,name,thread,directory,worktree,git_dir,"
@@ -77,8 +76,8 @@ def _bind(
             name,
             thread,
             str(directory),
-            str(root),
-            git_dir,
+            str(tree.root),
+            str(tree.git_dir),
             json.dumps(check),
             phase,
             host,
@@ -88,7 +87,7 @@ def _bind(
         raise TjenticError(f"Item {name!r} already exists. Use workflow resume.")
     db.execute(
         "INSERT INTO worktree_ids VALUES(?,?,?)",
-        (identity, str(metadata.st_dev), str(metadata.st_ino)),
+        (identity, tree.device, tree.inode),
     )
     return item(db, identity)
 
@@ -102,7 +101,8 @@ async def _begin(
     environment: Mapping[str, str],
 ) -> sqlite3.Row:
     name = args.item
-    root = worktree(Path.cwd())
+    tree = Worktree.discover(Path.cwd())
+    root = tree.root
     if find_item(db, root, name) is not None:
         raise TjenticError(f"Item {name!r} already exists. Use workflow resume.")
     lane = await select(
@@ -123,8 +123,10 @@ async def _begin(
         )
         session = opened.session
         thread = str(session.id)
+        if Worktree.discover(root) != tree:
+            raise TjenticError(f"The registered Git worktree at {root} changed.")
         with db:
-            row = _bind(db, name, thread, root, root, args.check, "implement")
+            row = _bind(db, name, thread, root, tree, args.check, "implement")
             db.execute(
                 "INSERT INTO deliveries(id,thread,directory,prompt) VALUES(?,?,?,?)",
                 (delivery, thread, str(root), prompt),
@@ -241,7 +243,10 @@ def status(db: sqlite3.Connection, name: str) -> dict[str, object]:
             result["pr_decisions"] = [
                 dict(entry)
                 for entry in db.execute(
-                    "SELECT * FROM pr_decisions WHERE item=? ORDER BY id", (name,)
+                    "SELECT id,item,pr,revision,merge_oid,host,profile,thread,"
+                    "generation,kind,reason,delivery FROM pr_decisions "
+                    "WHERE item=? ORDER BY id",
+                    (name,),
                 )
             ]
     intake = db.execute(

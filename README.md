@@ -12,6 +12,8 @@ In `tj codex` or `tj claude`, ask the agent to finish a GitHub issue when its li
 
 The Rust listener follows the PR after the terminal closes. Starting either managed launcher recovers outstanding waits. A merge of the accepted revision records one local closeout. A changed revision, changed link, or closed-unmerged PR leaves the item open and sends the owner a review event. Check the result in the item's worktree with `tj workflow status ITEM`. External issue updates and terminal cleanup are separate operations.
 
+Before sending a review event, the listener rechecks the item’s owner, hold, accepted revision and latest local check. It records the claim and releases SQLite before contacting the host. A hold or handoff can take effect while that send is in flight. In `tj workflow status ITEM`, a `queued` receipt means Codex accepted the message and an `emitted` receipt means TJ flushed the event to Claude’s monitor stream. TJ retries a definite failure to start the send. If the host’s acknowledgement is lost, the receipt is `uncertain`. A listener interrupted during submission can leave a `dispatching` receipt. Inspect the recorded session before resending either one.
+
 Claude’s session plugin runs `tj watch` to receive events. On versions without plugin monitors the tool can arm a native background Bash subscription. Codex uses its native queue addressed to the recorded thread. Routine merges and unchanged CI use zero model requests. Source installations compile the bundled listener with Cargo and a C compiler. The wheel includes the listener.
 
 ## Recover a Codex session
