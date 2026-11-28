@@ -21,7 +21,7 @@ class Watch:
 
     def call(self, *args: str, capture: bool = False) -> str:
         result = subprocess.run(
-            [self.listener, "--state", self.state, *args],
+            [self.listener, "--state", self.state, "--python", sys.executable, *args],
             stdout=subprocess.PIPE if capture else None,
             stderr=subprocess.PIPE,
             text=True,

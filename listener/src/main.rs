@@ -18,6 +18,9 @@ use uuid::Uuid;
 struct Cli {
     #[arg(long)]
     state: PathBuf,
+    /// Interpreter from the TJ installation that started this listener.
+    #[arg(long)]
+    python: Option<PathBuf>,
     #[command(subcommand)]
     command: Action,
 }
@@ -60,7 +63,7 @@ enum Action {
     },
 }
 
-fn reconcile(db: &mut Store) -> Result<()> {
+fn reconcile(db: &mut Store, state: &Path, python: &Path) -> Result<()> {
     for wait in db.waits()? {
         let result = Issue::parse(&wait.issue)
             .and_then(|issue| issue.read())
@@ -69,7 +72,7 @@ fn reconcile(db: &mut Store) -> Result<()> {
             db.error(&wait, &error.to_string())?;
         }
     }
-    while Host::Codex.deliver(db, None, None)? {}
+    while Host::Codex.deliver(db, None, None, state, python)? {}
     Ok(())
 }
 
@@ -82,7 +85,7 @@ fn lock_file(state: &Path) -> Result<std::fs::File> {
         .open(state.join("pr-listener.lock"))?)
 }
 
-fn start(state: &Path) -> Result<()> {
+fn start(state: &Path, python: &Path) -> Result<()> {
     let lock = lock_file(state)?;
     if let Err(e) = lock.try_lock() {
         return match e {
@@ -98,6 +101,8 @@ fn start(state: &Path) -> Result<()> {
     child
         .arg("--state")
         .arg(state)
+        .arg("--python")
+        .arg(python)
         .arg("serve")
         .current_dir(state)
         .stdin(Stdio::null())
@@ -119,7 +124,7 @@ fn start(state: &Path) -> Result<()> {
     Ok(())
 }
 
-fn serve(state: &Path, db: &mut Store) -> Result<()> {
+fn serve(state: &Path, db: &mut Store, python: &Path) -> Result<()> {
     let lock = lock_file(state)?;
     match lock.try_lock() {
         Ok(()) => (),
@@ -128,14 +133,14 @@ fn serve(state: &Path, db: &mut Store) -> Result<()> {
     }
     let mut interval = Duration::from_secs(15);
     loop {
-        if let Err(e) = reconcile(db) {
+        if let Err(e) = reconcile(db, state, python) {
             eprintln!("{e:#}");
         }
         if db.waits()?.is_empty() {
             // Registration commits before starting a service. Recheck after relinquishing ownership.
             drop(lock);
             if !db.waits()?.is_empty() {
-                start(state)?;
+                start(state, python)?;
             }
             return Ok(());
         }
@@ -173,17 +178,26 @@ fn claude_subscribed(state: &Path, owner: &Owner) -> Result<bool> {
 
 fn main() -> Result<()> {
     let args = Cli::parse();
+    let python = match args.python {
+        Some(path) => path,
+        None => std::env::current_exe()?
+            .with_file_name(format!("python{}", std::env::consts::EXE_SUFFIX)),
+    };
+    ensure!(
+        python.is_absolute(),
+        "the TJ interpreter path must be absolute"
+    );
     let mut db = Store::open(&args.state)?;
     match args.command {
         Action::Init => Ok(()),
         Action::Ensure => {
             if !db.waits()?.is_empty() {
-                start(&args.state)?;
+                start(&args.state, &python)?;
             }
             Ok(())
         }
-        Action::Serve => serve(&args.state, &mut db),
-        Action::Reconcile => reconcile(&mut db),
+        Action::Serve => serve(&args.state, &mut db, &python),
+        Action::Reconcile => reconcile(&mut db, &args.state, &python),
         Action::Register {
             owner,
             item,
@@ -231,7 +245,7 @@ fn main() -> Result<()> {
                 println!("Local closeout recorded for {item} at {revision}.");
                 return Ok(());
             }
-            start(&args.state)?;
+            start(&args.state, &python)?;
             if matches!(owner.host, Host::Claude) && !claude_subscribed(&args.state, &owner)? {
                 println!(
                     "For this session, start native Bash with run_in_background=true and command `tj watch --once` to receive an event if the PR needs attention."
@@ -246,7 +260,14 @@ fn main() -> Result<()> {
             let profile = owner.profile.to_str().context("invalid profile path")?;
             let thread = owner.thread.to_string();
             loop {
-                if owner.host.deliver(&mut db, Some(profile), Some(&thread))? && once {
+                if owner.host.deliver(
+                    &mut db,
+                    Some(profile),
+                    Some(&thread),
+                    &args.state,
+                    &python,
+                )? && once
+                {
                     return Ok(());
                 }
                 std::thread::sleep(Duration::from_secs(1));

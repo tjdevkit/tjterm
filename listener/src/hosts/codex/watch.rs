@@ -1,8 +1,8 @@
 use anyhow::{Result, ensure};
-use std::process::Command;
+use std::{path::Path, process::Command};
 use tj_listener::store::Notice;
 
-pub(crate) fn prepare(notice: &Notice) -> Result<()> {
+pub(crate) fn prepare(notice: &Notice, state: &Path, python: &Path) -> Result<()> {
     // An unloaded thread needs a running server for queue --resume. The native
     // daemon command is idempotent and does not submit a turn.
     let server = Command::new("codex")
@@ -15,6 +15,18 @@ pub(crate) fn prepare(notice: &Notice) -> Result<()> {
             String::from_utf8_lossy(&server.stderr).trim()
         );
     }
+    let check = Command::new(python)
+        .args(["-I", "-m", "tjentic.watch.preflight"])
+        .arg(state)
+        .arg(notice.item_key())
+        .arg(&notice.thread)
+        .env("CODEX_HOME", &notice.profile)
+        .output()?;
+    ensure!(
+        check.status.success(),
+        "Codex wake preflight failed: {}",
+        String::from_utf8_lossy(&check.stderr).trim()
+    );
     Ok(())
 }
 

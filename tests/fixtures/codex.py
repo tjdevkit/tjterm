@@ -27,6 +27,9 @@ def main() -> int:
         payload: dict[str, object]
         if method == "initialize":
             payload = {"result": {"userAgent": "synthetic"}}
+        elif method == "thread/read":
+            assert set(params) == {"threadId"}
+            payload = {"result": {"thread": config["thread"]}}
         elif "error" in config:
             payload = {"error": {"code": -32601, "message": config["error"]}}
         else:

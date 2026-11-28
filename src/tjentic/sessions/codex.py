@@ -308,13 +308,18 @@ class Codex:
             "thread/name/set", {"threadId": str(identity), "name": title}
         )
 
-    async def transcript(self, identity: UUID) -> Path:
+    async def read(self, identity: UUID) -> dict[str, object]:
         data = await self.request("thread/read", {"threadId": str(identity)})
         thread = data.get("thread")
-        if isinstance(thread, dict) and thread.get("id") == str(identity):
-            recorded = thread.get("path")
-            if isinstance(recorded, str) and Path(recorded).is_absolute():
-                return Path(recorded)
+        if not isinstance(thread, dict) or thread.get("id") != str(identity):
+            raise TjenticError("Codex did not return the requested thread.")
+        return thread
+
+    async def transcript(self, identity: UUID) -> Path:
+        thread = await self.read(identity)
+        recorded = thread.get("path")
+        if isinstance(recorded, str) and Path(recorded).is_absolute():
+            return Path(recorded)
         raise TjenticError("Codex did not report the recipient's local transcript.")
 
     async def terminal_launch(

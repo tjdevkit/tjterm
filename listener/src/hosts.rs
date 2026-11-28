@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::ValueEnum;
+use std::path::Path;
 use tj_listener::store::{Notice, Store};
 
 mod claude {
@@ -26,6 +27,8 @@ impl Host {
         store: &mut Store,
         profile: Option<&str>,
         thread: Option<&str>,
+        state: &Path,
+        python: &Path,
     ) -> Result<bool> {
         let Some(notice) = store.claim_notice(self.name(), profile, thread)? else {
             return Ok(false);
@@ -33,7 +36,7 @@ impl Host {
         let send: fn(&Notice) -> Result<&'static str> = match self {
             Self::Claude => claude::watch::send,
             Self::Codex => {
-                if let Err(error) = codex::watch::prepare(&notice) {
+                if let Err(error) = codex::watch::prepare(&notice, state, python) {
                     store.retry_unsubmitted(notice.id)?;
                     return Err(error);
                 }

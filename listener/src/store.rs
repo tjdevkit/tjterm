@@ -39,6 +39,8 @@ pub struct Binding<'a> {
 
 #[derive(Serialize)]
 pub struct Notice {
+    #[serde(skip)]
+    item_key: String,
     pub id: i64,
     pub item: String,
     pub pr: String,
@@ -46,6 +48,13 @@ pub struct Notice {
     pub reason: String,
     pub profile: String,
     pub thread: String,
+}
+
+impl Notice {
+    /// The stable key of the bound item, independent of its display name.
+    pub fn item_key(&self) -> &str {
+        &self.item_key
+    }
 }
 
 impl Store {
@@ -236,7 +245,8 @@ impl Store {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let event = tx
             .query_row(
-                "SELECT id,item,pr,revision,reason,profile,thread FROM pr_deliverable
+                "SELECT id,item,pr,revision,reason,profile,thread,
+              (SELECT p.item FROM pr_decisions p WHERE p.id=d.id) FROM pr_deliverable d
              WHERE host=?1 AND delivery='pending' AND (?2 IS NULL OR profile=?2)
              AND (?3 IS NULL OR thread=?3) ORDER BY id LIMIT 1",
                 params![host, profile, thread],
@@ -249,6 +259,7 @@ impl Store {
                         reason: r.get(4)?,
                         profile: r.get(5)?,
                         thread: r.get(6)?,
+                        item_key: r.get(7)?,
                     })
                 },
             )
