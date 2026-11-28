@@ -1,4 +1,4 @@
-name: Scaffold
+name: Python
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  scaffold:
+  checks:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -34,4 +34,14 @@ jobs:
           test -s AGENTS.md
           test -s plans/migration/PLAN.md
       - run: uv sync --locked
-      - run: uv run --locked ruff check pyproject.toml
+      - run: uv run --locked ruff format --check
+      - run: uv run --locked ruff check
+      - run: uv run --locked mypy
+      - run: uv run --locked pytest
+      - run: uv build --wheel
+      - run: uv run --locked tj standards sync --help
+      - name: Check the project against its pinned Python standards
+        run: >-
+          uv tool run --isolated --python 3.12
+          --from git+https://github.com/tjentic/python-standards.git@8a3bf5a435227cfbc681d20e4a0286e7d8d30887
+          check-python-standards --root .
