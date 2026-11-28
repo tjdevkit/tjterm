@@ -1,7 +1,7 @@
 import argparse
 import json
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -182,7 +182,7 @@ async def _implemented(
 async def advance(
     db: sqlite3.Connection,
     name: str,
-    command: Sequence[str],
+    codex_command: Callable[[], Sequence[str]],
     *,
     environment: Mapping[str, str],
 ) -> None:
@@ -196,14 +196,16 @@ async def advance(
             )
         root = verify_tree(db, row)
         if row["phase"] == "implement":
-            await _implemented(db, row, root, command, environment=environment)
+            await _implemented(db, row, root, codex_command(), environment=environment)
             continue
         if row["phase"] == "check":
             run_check(db, row)
             continue
         check = latest_check(db, name)
         assert check is not None
-        reply = await deliver(db, command, check["delivery"], environment=environment)
+        reply = await deliver(
+            db, codex_command(), check["delivery"], environment=environment
+        )
         hold = None
         if check["exit_code"] == 0:
             phase = "ready"
@@ -285,7 +287,7 @@ def status(db: sqlite3.Connection, name: str) -> dict[str, object]:
 
 async def workflow(
     args: argparse.Namespace,
-    command: Sequence[str],
+    codex_command: Callable[[], Sequence[str]],
     state: Path,
     config: Path,
     *,
@@ -308,11 +310,13 @@ async def workflow(
                     args.item,
                     args.thread,
                     args.check,
-                    command,
+                    codex_command(),
                     environment=environment,
                 )
             elif args.operation == "run":
-                row = await _begin(db, args, command, config, environment=environment)
+                row = await _begin(
+                    db, args, codex_command(), config, environment=environment
+                )
             else:
                 existing = find_item(db, root, args.item)
                 if existing is None:
@@ -348,11 +352,13 @@ async def workflow(
                 (key, row["thread"]),
             ).fetchone()
             if active and not item(db, key)["hold"]:
-                launch_assignment(db, state, active, command, environment=environment)
+                launch_assignment(
+                    db, state, active, codex_command(), environment=environment
+                )
                 print(json.dumps(status(db, key)))
                 return 0
             try:
-                await advance(db, key, command, environment=environment)
+                await advance(db, key, codex_command, environment=environment)
             except (TjenticError, OSError, ValueError) as error:
                 with db:
                     db.execute(
@@ -364,4 +370,4 @@ async def workflow(
                 db.execute("UPDATE items SET last_error=NULL WHERE id=?", (key,))
             result = status(db, key)
             print(json.dumps(result))
-            return 1 if result["hold"] else 0
+            return 1 if result["hold"] and args.operation != "hold" else 0

@@ -51,7 +51,9 @@ impl Reference {
                 return Err(ReferenceError::Repository);
             }
         }
-        if !number.bytes().all(|c| c.is_ascii_digit()) {
+        // Preview issue URLs retained the spelling accepted by u32::from_str.
+        // Pull request links come from GitHub and retain their unsigned URL syntax.
+        if kind == "pull" && !number.bytes().all(|c| c.is_ascii_digit()) {
             return Err(ReferenceError::Number);
         }
         let number = number
@@ -194,6 +196,10 @@ mod tests {
             (issue.owner(), issue.repo(), issue.number()),
             ("tools", "engine", 13)
         );
+        let preview_url = "https://github.com/tools/engine/issues/+0010";
+        let preview = IssueRef::parse(preview_url).unwrap();
+        assert_eq!(preview.as_str(), preview_url);
+        assert_eq!(preview.number(), 10);
         for url in [
             "https://github.com/tools/engine/issues/13",
             "https://github.com/tools/engine/pull/0",

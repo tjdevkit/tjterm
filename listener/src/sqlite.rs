@@ -8,12 +8,14 @@ use crate::{
         forge::IssueRef,
         id::Id,
         owner::{Host, Owner},
-        wait::{Candidate, Event, ItemName, Wait},
+        wait::{Candidate, Event, ItemName, ReplaceError, Wait},
     },
     worktree::Worktree,
 };
-use rows::{NoticeRow, WaitRow};
-use rusqlite::{Connection, ErrorCode, OptionalExtension, TransactionBehavior, params};
+use rows::{Pending, Scan, WaitRow};
+use rusqlite::{
+    Connection, ErrorCode, OptionalExtension, Transaction, TransactionBehavior, params,
+};
 use std::{error::Error, fs, path::Path, time::Duration};
 use thiserror::Error;
 
@@ -70,7 +72,7 @@ pub enum ReadError {
     #[error(transparent)]
     Storage(#[from] StorageError),
     /// A record has an invalid value for a domain field.
-    #[error("invalid stored {field}")]
+    #[error("invalid stored {field}: {source}")]
     Invalid {
         /// The field containing the invalid value.
         field: &'static str,
@@ -78,6 +80,9 @@ pub enum ReadError {
         #[source]
         source: Box<dyn Error + Send + Sync>,
     },
+    /// The listener has no observation for this stored pending condition.
+    #[error("unsupported wait condition: {0}")]
+    Condition(String),
     /// The stored wait and its durable closeout evidence disagree.
     #[error("stored wait has an inconsistent closeout receipt")]
     Lifecycle,
@@ -86,6 +91,10 @@ pub enum ReadError {
 /// Registration failed before binding the accepted revision.
 #[derive(Debug, Error)]
 pub enum BindError {
+    /// The existing wait cannot accept the owner's new candidate.
+    #[error(transparent)]
+    Replacement(#[from] ReplaceError),
+
     /// One of the records could not be written.
     #[error(transparent)]
     Storage(#[from] StorageError),
@@ -101,8 +110,8 @@ pub enum BindError {
     /// Paths used by both Python and Rust must be representable as `SQLite` text.
     #[error("registered workflow paths must be valid UTF-8")]
     Path,
-    /// A different PR, owner, or closed revision is already bound.
-    #[error("item already has a different linked PR, owner or completed decision")]
+    /// The existing issue, owner, condition or closed item prevents this registration.
+    #[error("registration conflicts with the existing issue, owner, wait condition or closed item")]
     Candidate,
 }
 
@@ -270,7 +279,28 @@ impl Store {
                 WaitRow::read,
             )
             .map_err(StorageError::from)?;
-        let wait = Wait::try_from(row)?;
+        let mut wait = Wait::try_from(row)?;
+        let previous = wait.generation();
+        wait.replace_candidate(b.candidate)?;
+        if wait.generation() != previous {
+            let updated = tx
+                .execute(
+                    "UPDATE pr_waits SET pr=?2, revision=?3, generation=?4
+                 WHERE item=?1 AND generation=?5
+                 AND EXISTS (SELECT 1 FROM items WHERE id=?1 AND phase!='closed')",
+                    params![
+                        key,
+                        wait.pr().as_str(),
+                        wait.revision().as_str(),
+                        i64::try_from(wait.generation()).map_err(StorageError::from)?,
+                        i64::try_from(previous).map_err(StorageError::from)?,
+                    ],
+                )
+                .map_err(StorageError::from)?;
+            if updated != 1 {
+                return Err(BindError::Candidate);
+            }
+        }
         tx.commit().map_err(StorageError::from)?;
         Ok(wait)
     }
@@ -293,14 +323,35 @@ impl Store {
 
     /// Read pending waits, including held work that may become eligible again.
     pub fn waits(&self) -> Result<Vec<Wait>, ReadError> {
-        let mut stmt = self
-            .0
-            .prepare("SELECT * FROM pr_wait_snapshot WHERE state='pending' AND condition='merged' ORDER BY item")
+        Ok(self
+            .pending(None, None)?
+            .into_iter()
+            .map(|r| r.wait)
+            .collect())
+    }
+
+    fn pending(
+        &self,
+        host: Option<Host>,
+        owner: Option<&Owner>,
+    ) -> Result<Vec<Pending>, ReadError> {
+        let first = Scan::read(&self.0, host, owner)?;
+        if first.errors.is_empty() {
+            return Ok(first.pending);
+        }
+        // Recheck after acquiring the writer; another process may have repaired or rebound the item.
+        let tx = Transaction::new_unchecked(&self.0, TransactionBehavior::Immediate)
             .map_err(StorageError::from)?;
-        stmt.query_map([], WaitRow::read)
-            .map_err(StorageError::from)?
-            .map(|row| Wait::try_from(row.map_err(StorageError::from)?))
-            .collect()
+        let current = Scan::read(&tx, host, owner)?;
+        for (id, error) in current.errors {
+            tx.execute(
+                "UPDATE pr_waits SET last_error=? WHERE rowid=?",
+                params![error, id],
+            )
+            .map_err(StorageError::from)?;
+        }
+        tx.commit().map_err(StorageError::from)?;
+        Ok(current.pending)
     }
 
     /// Record a transient observation error only if the binding is still current.
@@ -374,19 +425,11 @@ impl Store {
         if owner.is_some_and(|o| o.host() != host) {
             return Ok(Vec::new());
         }
-        let profile = owner.map(Owner::profile_str);
-        let thread = owner.map(|o| o.thread().to_string());
-        let mut stmt = self
-            .0
-            .prepare(
-                "SELECT * FROM pr_deliverable WHERE host=?1 AND delivery='pending'
-             AND (?2 IS NULL OR profile=?2) AND (?3 IS NULL OR thread=?3) ORDER BY id",
-            )
-            .map_err(StorageError::from)?;
-        stmt.query_map(params![host.as_str(), profile, thread], NoticeRow::read)
-            .map_err(StorageError::from)?
-            .map(|row| Notice::try_from(row.map_err(StorageError::from)?))
-            .collect()
+        Ok(self
+            .pending(Some(host), owner)?
+            .into_iter()
+            .filter_map(|r| r.notice)
+            .collect())
     }
 
     /// Commit exclusive authorisation immediately before submitting outside `SQLite`.

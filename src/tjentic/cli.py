@@ -325,9 +325,7 @@ def main(
                 return asyncio.run(
                     workflow(
                         args,
-                        []
-                        if args.operation == "status"
-                        else (codex_command or Host.CODEX.command()),
+                        lambda: codex_command or Host.CODEX.command(),
                         workflow_state,
                         lanes,
                         environment=os.environ,

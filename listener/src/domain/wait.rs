@@ -146,7 +146,7 @@ pub struct Wait {
     events: Vec<Event>,
 }
 
-/// Persisted generations start at one and advance when ownership changes.
+/// Persisted generations start at one and advance when ownership or the candidate changes.
 #[derive(Debug, Error)]
 #[error("wait generation must be positive")]
 pub struct GenerationError;
@@ -155,6 +155,17 @@ pub struct GenerationError;
 #[derive(Debug, Error)]
 #[error("the wait already closed on a different observation")]
 pub struct ObserveError;
+
+/// An accepted registration cannot replace this wait's existing candidate.
+#[derive(Debug, Error)]
+pub enum ReplaceError {
+    /// The original candidate already produced its local closeout.
+    #[error("cannot replace the candidate of a closed wait")]
+    Closed,
+    /// Another generation cannot be represented.
+    #[error("wait generation exhausted")]
+    Generation,
+}
 
 impl Wait {
     /// Restore a durable lifecycle without publishing decisions that were already committed.
@@ -194,9 +205,27 @@ impl Wait {
     pub fn revision(&self) -> &Oid {
         self.candidate.revision()
     }
-    /// Return the ownership generation the repository must recheck before saving.
+    /// Return the binding generation the repository must recheck before saving.
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// Accept an explicit replacement, fencing observations and deliveries for the previous binding.
+    pub(crate) fn replace_candidate(&mut self, accepted: &Candidate) -> Result<(), ReplaceError> {
+        if &self.candidate == accepted {
+            return Ok(());
+        }
+        if matches!(self.progress, Progress::Closed(_)) {
+            return Err(ReplaceError::Closed);
+        }
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .ok_or(ReplaceError::Generation)?;
+        self.candidate = accepted.clone();
+        self.progress = Progress::Pending;
+        self.events.clear();
+        Ok(())
     }
 
     /// Apply a forge observation, recording only the first review or confirmed merge.

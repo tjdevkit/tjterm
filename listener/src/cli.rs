@@ -2,6 +2,7 @@ use crate::hosts::{Transport, claude::watch::Monitor, codex::watch::Queue};
 use anyhow::{Context, Result, ensure};
 use clap::{Args, Parser, Subcommand};
 use std::{
+    collections::{HashMap, hash_map::Entry},
     fs::{File, OpenOptions, TryLockError},
     hash::{DefaultHasher, Hash, Hasher},
     io,
@@ -151,7 +152,7 @@ impl Service {
         }
     }
 
-    fn reconcile(&self, db: &mut Store) -> Result<()> {
+    fn observe(&self, db: &mut Store) -> Result<()> {
         for mut wait in db.waits()? {
             match self.github.read(wait.issue()) {
                 Ok(links) => {
@@ -163,7 +164,6 @@ impl Service {
                 }
             }
         }
-        deliver(db, &self.queue(), None, false)?;
         Ok(())
     }
 
@@ -220,22 +220,43 @@ impl Service {
             Err(TryLockError::WouldBlock) => return Ok(()),
             Err(TryLockError::Error(error)) => return Err(error.into()),
         }
-        let mut interval = Duration::from_secs(15);
-        loop {
-            if let Err(error) = self.reconcile(db) {
-                eprintln!("{error:#}");
-            }
-            if db.waits()?.is_empty() {
-                // Registrations committed as we relinquished ownership must still start a service.
-                drop(lock);
-                if !db.waits()?.is_empty() {
-                    self.start()?;
+        thread::scope(|scope| {
+            let mut sending: HashMap<Owner, thread::ScopedJoinHandle<'_, ()>> = HashMap::new();
+            let mut interval = Duration::from_secs(15);
+            loop {
+                if let Err(error) = self.observe(db) {
+                    eprintln!("{error:#}");
                 }
-                return Ok(());
+                sending.retain(|_, worker| !worker.is_finished());
+                for notice in db.notices(Host::Codex, None)? {
+                    if let Entry::Vacant(slot) = sending.entry(notice.owner().clone()) {
+                        let owner = slot.key().clone();
+                        let worker = thread::Builder::new().spawn_scoped(scope, move || {
+                            if let Err(error) = self.deliver_to(&owner) {
+                                eprintln!("{error:#}");
+                            }
+                        })?;
+                        slot.insert(worker);
+                    }
+                }
+                if db.waits()?.is_empty() {
+                    // Release the poller before waiting for outstanding native receipts.
+                    drop(lock);
+                    if !db.waits()?.is_empty() {
+                        self.start()?;
+                    }
+                    return Ok(());
+                }
+                thread::sleep(interval);
+                interval = (interval * 2).min(Duration::from_mins(2));
             }
-            thread::sleep(interval);
-            interval = (interval * 2).min(Duration::from_mins(2));
-        }
+        })
+    }
+
+    fn deliver_to(&self, owner: &Owner) -> Result<()> {
+        let mut db = Store::open(&self.state)?;
+        deliver(&mut db, &self.queue(), Some(owner), false)?;
+        Ok(())
     }
 
     fn subscription(&self, owner: &Owner) -> io::Result<File> {
@@ -285,7 +306,11 @@ impl Service {
                 Ok(())
             }
             Workflow::Serve => self.serve(&mut db),
-            Workflow::Reconcile => self.reconcile(&mut db),
+            Workflow::Reconcile => {
+                self.observe(&mut db)?;
+                deliver(&mut db, &self.queue(), None, false)?;
+                Ok(())
+            }
             Workflow::Register {
                 owner,
                 item,

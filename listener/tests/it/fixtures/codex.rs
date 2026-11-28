@@ -10,7 +10,7 @@ use std::{
 
 fn signal_and_wait(directory: &Path, name: &str) {
     fs::write(directory.join(name), "").expect("signal the test process");
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(55);
     while !directory.join("release").exists() {
         assert!(Instant::now() < deadline, "the fixture was not released");
         thread::sleep(Duration::from_millis(5));

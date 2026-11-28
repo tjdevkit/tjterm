@@ -8,7 +8,7 @@ use tj_listener::{
         owner::{Host, Owner},
         wait::{Candidate, ItemName, Wait},
     },
-    sqlite::{Binding, SaveOutcome, Store},
+    sqlite::{BindError, Binding, SaveOutcome, Store},
     worktree::Worktree,
 };
 
@@ -42,24 +42,37 @@ fn bind(store: &mut Store, root: &Path, owner: &Owner) -> Wait {
 }
 
 fn bind_revision(store: &mut Store, root: &Path, owner: &Owner, revision: &str) -> Wait {
-    store
-        .bind(&Binding {
-            item: &ItemName::parse("widget").unwrap(),
-            issue: &IssueRef::parse(ISSUE).unwrap(),
-            candidate: &Candidate::accept(
-                &links(State::Open, revision),
-                &Oid::parse(revision).unwrap(),
-            )
-            .unwrap(),
-            owner,
-            worktree: &checkout(root),
-        })
-        .unwrap()
+    register(store, root, owner, ISSUE, PR, revision).unwrap()
+}
+
+fn register(
+    store: &mut Store,
+    root: &Path,
+    owner: &Owner,
+    issue: &str,
+    pr: &str,
+    revision: &str,
+) -> Result<Wait, BindError> {
+    store.bind(&Binding {
+        item: &ItemName::parse("widget").unwrap(),
+        issue: &IssueRef::parse(issue).unwrap(),
+        candidate: &Candidate::accept(
+            &pull(pr, State::Open, revision),
+            &Oid::parse(revision).unwrap(),
+        )
+        .unwrap(),
+        owner,
+        worktree: &checkout(root),
+    })
 }
 
 fn links(state: State, revision: &str) -> Links {
+    pull(PR, state, revision)
+}
+
+fn pull(pr: &str, state: State, revision: &str) -> Links {
     Links::Single(Pull::new(
-        PullRef::parse(PR).unwrap(),
+        PullRef::parse(pr).unwrap(),
         Oid::parse(revision).unwrap(),
         state,
     ))
@@ -338,4 +351,112 @@ fn accepted_transfers_allow_closeout_after_all_recipient_work_is_finished() {
         }
         assert!(store.has_closeout(&wait).unwrap());
     }
+}
+
+#[test]
+fn only_explicit_registration_accepts_a_replacement_pr_and_fences_stale_replays() {
+    const REPLACEMENT: &str = "https://github.com/paper/widget/pull/18";
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let mut store = Store::open(root).unwrap();
+    let session = owner(Host::Claude, root, THREAD);
+    let mut first = bind(&mut store, root, &session);
+    first.observe(&pull(REPLACEMENT, State::Open, SHA)).unwrap();
+    store.save(&mut first).unwrap();
+    assert_eq!(store.waits().unwrap()[0].pr().as_str(), PR);
+    let notice = store
+        .notices(Host::Claude, Some(&session))
+        .unwrap()
+        .remove(0);
+
+    let mut second = register(&mut store, root, &session, ISSUE, REPLACEMENT, SHA).unwrap();
+    assert!(store.begin_submission(&notice).unwrap().is_none());
+    let mut third = bind(&mut store, root, &session);
+    assert_eq!(
+        [first.generation(), second.generation(), third.generation()],
+        [1, 2, 3]
+    );
+    assert!(store.begin_submission(&notice).unwrap().is_none());
+    first.observe(&links(merged(), SHA)).unwrap();
+    assert!(matches!(
+        store.save(&mut first).unwrap(),
+        SaveOutcome::Ineligible
+    ));
+
+    third.observe(&pull(REPLACEMENT, State::Open, SHA)).unwrap();
+    store.save(&mut third).unwrap();
+    let mut current = register(&mut store, root, &session, ISSUE, REPLACEMENT, SHA).unwrap();
+    assert_eq!(current.generation(), 4);
+    assert_eq!(
+        register(&mut store, root, &session, ISSUE, REPLACEMENT, SHA)
+            .unwrap()
+            .generation(),
+        4
+    );
+    second.observe(&pull(REPLACEMENT, merged(), SHA)).unwrap();
+    assert!(matches!(
+        store.save(&mut second).unwrap(),
+        SaveOutcome::Ineligible
+    ));
+    current.observe(&pull(REPLACEMENT, merged(), SHA)).unwrap();
+    store.save(&mut current).unwrap();
+    assert!(store.has_closeout(&current).unwrap());
+    assert!(register(&mut store, root, &session, ISSUE, PR, SHA).is_err());
+    let db = sql(root);
+    assert_eq!(db.query_row("SELECT count(*) FROM pr_decisions WHERE kind='review' AND pr=? AND generation IN (1,3)", [PR], |r| r.get::<_,i64>(0)).unwrap(), 2);
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM pr_decisions WHERE kind='closeout' AND pr=? AND generation=4",
+            [REPLACEMENT],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn a_replacement_requires_the_existing_issue_and_authorised_owner() {
+    const REPLACEMENT: &str = "https://github.com/paper/widget/pull/18";
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let mut store = Store::open(root).unwrap();
+    let session = owner(Host::Claude, root, THREAD);
+    bind(&mut store, root, &session);
+    for other in [
+        owner(Host::Claude, root, NEXT),
+        owner(Host::Codex, root, THREAD),
+        owner(Host::Claude, &root.join("other"), THREAD),
+    ] {
+        assert!(register(&mut store, root, &other, ISSUE, REPLACEMENT, SHA).is_err());
+    }
+    assert!(
+        register(
+            &mut store,
+            root,
+            &session,
+            "https://github.com/paper/widget/issues/8",
+            REPLACEMENT,
+            SHA
+        )
+        .is_err()
+    );
+    let db = sql(root);
+    db.execute("UPDATE items SET phase='closed'", []).unwrap();
+    assert!(register(&mut store, root, &session, ISSUE, REPLACEMENT, SHA).is_err());
+    let unchanged = store.waits().unwrap().remove(0);
+    assert_eq!(unchanged.generation(), 1);
+    assert_eq!(unchanged.pr().as_str(), PR);
+
+    db.execute(
+        "UPDATE items SET phase='assigned', host='codex', thread=?",
+        [NEXT],
+    )
+    .unwrap();
+    assert!(register(&mut store, root, &session, ISSUE, REPLACEMENT, SHA).is_err());
+    let recipient = owner(Host::Codex, root, NEXT);
+    assert_eq!(bind(&mut store, root, &recipient).generation(), 2);
+    let replaced = register(&mut store, root, &recipient, ISSUE, REPLACEMENT, SHA).unwrap();
+    assert_eq!(replaced.generation(), 3);
+    assert_eq!(replaced.pr().as_str(), REPLACEMENT);
 }

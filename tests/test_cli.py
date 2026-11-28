@@ -2,7 +2,7 @@ import argparse
 import json
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 import pytest
@@ -239,6 +239,26 @@ def test_workflow_status_reuses_the_previous_preview_database(
 
 
 @pytest.mark.allow_hosts(["127.0.0.1"])
+def test_claude_item_can_be_paused_and_released_without_codex(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tree = tmp_path / "worktree"
+    subprocess.run(["git", "init", "-q", str(tree)], check=True)
+    monkeypatch.chdir(tree)
+    state = tmp_path / "state"
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+    monkeypatch.setenv("LOCALAPPDATA", str(state))
+    with database(state / "tjentic") as db:
+        bind_worktree(db, "widget", tree, thread=FIRST, host="claude")
+    monkeypatch.setattr("tjentic.hosts.host.shutil.which", lambda _: None)
+
+    assert main(["workflow", "hold", "widget", "awaiting review"]) == 0
+    assert json.loads(capsys.readouterr().out)["hold"] == "awaiting review"
+    assert main(["workflow", "release", "widget"]) == 0
+    assert json.loads(capsys.readouterr().out)["hold"] is None
+
+
+@pytest.mark.allow_hosts(["127.0.0.1"])
 def test_workflow_uses_the_available_lane_configuration(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -248,7 +268,7 @@ def test_workflow_uses_the_available_lane_configuration(
 
     async def capture_configuration(
         args: argparse.Namespace,
-        command: Sequence[str],
+        codex_command: Callable[[], Sequence[str]],
         state: Path,
         config: Path,
         *,

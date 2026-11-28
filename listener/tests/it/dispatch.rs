@@ -84,7 +84,7 @@ impl Trial {
         Self { root, db }
     }
 
-    fn reconcile(&self, mode: &str) -> Command {
+    fn command(&self, action: &str, mode: &str) -> Command {
         let root = self.root.path();
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_tj-listener"));
         cmd.env("PATH", root)
@@ -94,18 +94,18 @@ impl Trial {
             .arg(root.join("state"))
             .arg("--python")
             .arg(root.join(executable("python")))
-            .arg("reconcile")
+            .arg(action)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         cmd
     }
 
     fn run(&self, mode: &str) -> Output {
-        self.reconcile(mode).output().unwrap()
+        self.command("reconcile", mode).output().unwrap()
     }
 
-    fn pause(&self, mode: &str, signal: &str) -> Child {
-        let mut child = self.reconcile(mode).spawn().unwrap();
+    fn pause(&self, action: &str, mode: &str, signal: &str) -> Child {
+        let mut child = self.command(action, mode).spawn().unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         while !self.root.path().join(signal).exists() {
             assert!(
@@ -167,11 +167,11 @@ fn rejected_codex_wake_leaves_the_notice_pending_without_queueing() {
 #[test]
 fn a_native_submission_leaves_sqlite_writable_and_only_one_listener_can_send() {
     let trial = Trial::new("codex");
-    let sender = trial.pause("pause-queue", "submitted");
+    let sender = trial.pause("reconcile", "pause-queue", "submitted");
     let write = trial
         .db
         .execute("UPDATE items SET last_error='independent writer'", []);
-    let mut duplicate = trial.reconcile("ok").spawn().unwrap();
+    let mut duplicate = trial.command("reconcile", "ok").spawn().unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
     while duplicate.try_wait().unwrap().is_none() && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(5));
@@ -184,6 +184,56 @@ fn a_native_submission_leaves_sqlite_writable_and_only_one_listener_can_send() {
     assert_eq!(write.unwrap(), 1);
     assert_eq!(trial.queue_calls(), 1);
     assert_eq!(trial.receipt(), "queued");
+}
+
+#[test]
+fn the_background_service_closes_another_item_while_a_queue_is_blocked() {
+    let trial = Trial::new("codex");
+    trial.db.busy_timeout(Duration::from_secs(10)).unwrap();
+    trial.db.execute_batch("
+        INSERT INTO items SELECT 'second','other',thread,directory,worktree,git_dir,command,phase,NULL,NULL,'claude' FROM items;
+        INSERT INTO pr_waits(item,issue,pr,revision,host,profile,thread)
+            SELECT 'second',issue,pr,revision,'claude',profile,thread FROM pr_waits;").unwrap();
+    let mut service = trial.pause("serve", "pause-queue", "submitted");
+    let forge = json!({"data":{"repository":{"issue":{"closedByPullRequestsReferences":{
+        "totalCount":1,"nodes":[{"url":PR,"headRefOid":SHA,"state":"MERGED","mergeCommit":{"oid":MERGE}}]
+    }}}}});
+    fs::write(trial.root.path().join("forge.json"), forge.to_string()).unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(35);
+    let closed =
+        loop {
+            let closed: bool = trial.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pr_decisions WHERE item='second' AND kind='closeout')",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+            if closed || Instant::now() >= deadline {
+                break closed;
+            }
+            thread::sleep(Duration::from_millis(50));
+        };
+    let in_flight: String = trial
+        .db
+        .query_row(
+            "SELECT delivery FROM pr_decisions WHERE item=? AND kind='review'",
+            [ITEM],
+            |row| row.get(0),
+        )
+        .unwrap();
+    trial.release();
+    if !closed {
+        service.kill().unwrap();
+    }
+    let exit = service.wait_with_output().unwrap();
+    assert!(closed, "the sole poller was waiting for the Codex queue");
+    assert_eq!(in_flight, "dispatching");
+    assert!(
+        exit.status.success(),
+        "{}",
+        String::from_utf8_lossy(&exit.stderr)
+    );
+    assert_eq!(trial.queue_calls(), 1);
 }
 
 #[test]
@@ -213,7 +263,7 @@ fn a_newer_check_during_preflight_revokes_the_original_revision() {
     trial.db.execute("INSERT INTO deliveries(id,thread,directory,prompt) VALUES('fixture',?,'/fixture','fixture')", [THREAD]).unwrap();
     let insert = "INSERT INTO checks(item,attempt,revision,status,exit_code,output,delivery) VALUES(?,?,?,'',0,'','fixture')";
     trial.db.execute(insert, params![ITEM, 1, SHA]).unwrap();
-    let sender = trial.pause("pause-preflight", "preflight");
+    let sender = trial.pause("reconcile", "pause-preflight", "preflight");
     trial.db.execute(insert, params![ITEM, 2, MERGE]).unwrap();
     trial.release();
     assert!(sender.wait_with_output().unwrap().status.success());
@@ -226,7 +276,7 @@ fn an_ambiguous_exit_or_crash_after_queue_submission_never_replays_the_message()
     for crash in [false, true] {
         let trial = Trial::new("codex");
         let receipt = if crash {
-            let mut sender = trial.pause("pause-queue", "submitted");
+            let mut sender = trial.pause("reconcile", "pause-queue", "submitted");
             sender.kill().unwrap();
             trial.release();
             assert!(!sender.wait_with_output().unwrap().status.success());
