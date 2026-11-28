@@ -1,0 +1,5 @@
+[plugins."python@tjentic-project"]
+enabled = true
+
+[plugins."rust@tjentic-project"]
+enabled = true

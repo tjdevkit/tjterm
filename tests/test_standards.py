@@ -1,6 +1,8 @@
 import json
+import re
+import shutil
 import subprocess
-from collections.abc import Sequence
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -8,150 +10,89 @@ import pytest
 from tjentic.cli import main
 
 
-def _git(root: Path, *arguments: str) -> str:
-    result = subprocess.run(
+def test_project_plugins_enable_pinned_python_and_rust_in_each_host() -> None:
+    root = Path(__file__).resolve().parents[1]
+    catalog = json.loads(
+        (root / ".claude-plugin/marketplace.json").read_text(encoding="utf-8")
+    )
+    assert catalog["name"] == "tjentic-project"
+    plugins = catalog["plugins"]
+    assert sorted(plugin["name"] for plugin in plugins) == ["python", "rust"]
+    for plugin in plugins:
+        name = plugin["name"]
+        source = plugin["source"]
+        assert source["source"] == "url"
+        assert source["url"] == f"https://github.com/tjentic/{name}-standards.git"
+        assert re.fullmatch("[0-9a-f]{40}", source["sha"])
+
+    expected = {f"{plugin['name']}@{catalog['name']}" for plugin in plugins}
+    claude = json.loads((root / ".claude/settings.json").read_text(encoding="utf-8"))
+    codex = tomllib.loads((root / ".codex/config.toml").read_text(encoding="utf-8"))
+    assert {
+        key for key, active in claude["enabledPlugins"].items() if active is True
+    } == expected
+    assert {
+        key for key, entry in codex["plugins"].items() if entry.get("enabled") is True
+    } == expected
+
+
+def test_native_selection_from_linked_checkout_preserves_instruction_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    primary = tmp_path / "project"
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(["git", "init", "-q", str(primary)], check=True)
+    for folder in (".claude-plugin", ".claude", ".codex"):
+        shutil.copytree(root / folder, primary / folder)
+    notes = b"# Team notes\n"
+    (primary / "AGENTS.md").write_bytes(notes)
+    subprocess.run(["git", "add", "."], cwd=primary, check=True)
+    subprocess.run(
         [
             "git",
             "-c",
-            "user.name=Standards fixture",
+            "user.name=Fixture",
             "-c",
-            "user.email=fixture@example.com",
+            "user.email=fixture@example.test",
             "-c",
             "commit.gpgsign=false",
-            *arguments,
+            "commit",
+            "-qm",
+            "Adopt plugins",
         ],
-        cwd=root,
+        cwd=primary,
         check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
     )
-    return result.stdout.strip()
-
-
-@pytest.fixture
-def source(tmp_path: Path) -> Path:
-    repository = tmp_path / "standard source"
-    repository.mkdir()
-    _git(repository, "init", "--template=")
-    return repository
-
-
-@pytest.fixture
-def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    root = tmp_path / "worktree"
-    root.mkdir()
-    _git(root, "init", "--template=")
-    (root / ".tjentic").mkdir()
-    monkeypatch.chdir(root)
-    return root
-
-
-def _commit(repository: Path, body: str) -> str:
-    (repository / "rules.md").write_text(body, encoding="utf-8")
-    _git(repository, "add", "rules.md")
-    _git(repository, "commit", "-m", "Publish fixture rule")
-    return _git(repository, "rev-parse", "HEAD")
-
-
-def _configure(
-    project: Path, source: Path, revision: str, scopes: Sequence[str]
-) -> None:
-    sections = [
-        "\n".join(
-            (
-                "[[standards]]",
-                f"source = {json.dumps(str(source))}",
-                f"revision = {json.dumps(revision)}",
-                f"scope = {json.dumps(scope)}",
-                'files = ["rules.md"]',
-            )
+    for directory in (primary / ".worktrees" / "nested", tmp_path / "sibling"):
+        subprocess.run(
+            ["git", "worktree", "add", "-q", "--detach", str(directory)],
+            cwd=primary,
+            check=True,
         )
-        for scope in scopes
-    ]
-    (project / ".tjentic" / "standards.toml").write_text(
-        "\n\n".join(sections) if sections else "standards = []",
-        encoding="utf-8",
+        child = directory / "listener"
+        child.mkdir()
+        monkeypatch.chdir(child)
+        for host in ("codex", "claude"):
+            assert main(["plugins", "update", "--dry-run", "--host", host]) == 0
+            assert "rust@tjentic-project" in capsys.readouterr().out
+        assert (directory / "AGENTS.md").read_bytes() == notes
+        (directory / "AGENTS.md").write_bytes(
+            notes + b"<!-- tjentic:standards:start -->\nold rules\n"
+            b"<!-- tjentic:standards:end -->\n"
+        )
+        assert main(["plugins", "check", "--host", "codex"]) == 1
+        assert "marked standards block" in capsys.readouterr().err
+
+
+def test_old_selection_reports_migration_without_rewriting_notes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".tjentic").mkdir()
+    (tmp_path / ".tjentic/standards.toml").write_text(
+        "standards = []", encoding="utf-8"
     )
-
-
-def test_sync_previews_exact_commit_bytes_and_preserves_existing_guidance(
-    project: Path, source: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    older = _commit(source, "# House rules\nUse the pinned convention.\n")
-    newer = _commit(source, "# House rules\nUse the revised convention.\n")
-    instructions = project / "AGENTS.md"
-    team = b"# Team\r\nKeep B\xc3\xa9la's notes.\r\n"
-    instructions.write_bytes(team)
-    claude = project / "CLAUDE.md"
-    claude.write_text("@AGENTS.md\n", encoding="utf-8")
-    _configure(project, source, older, ["."])
-
-    assert main(["plugins", "update", "--dry-run"]) == 0
-    output = capsys.readouterr().out
-    assert "+++ b/AGENTS.md" in output
-    assert "+Use the pinned convention." in output
-    assert "revised" not in output
-    assert instructions.read_bytes() == team
-
-    assert main(["plugins", "update"]) == 0
-    first = instructions.read_bytes()
-    assert first.startswith(team)
-    assert b"Use the pinned convention.\r\n" in first
-    assert claude.read_text(encoding="utf-8") == "@AGENTS.md\n"
-    capsys.readouterr()
-    assert main(["plugins", "update"]) == 0
-    assert capsys.readouterr().out == "Project standards are up to date.\n"
-    assert instructions.read_bytes() == first
-
-    _configure(project, source, newer, ["."])
-    assert main(["plugins", "update"]) == 0
-    assert b"Use the revised convention.\r\n" in instructions.read_bytes()
-    assert b"Use the pinned convention." not in instructions.read_bytes()
-    assert instructions.read_bytes().startswith(team)
-
-
-def test_sync_removes_dropped_root_and_nested_sections(
-    project: Path, source: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    revision = _commit(source, "Scope-specific policy.\n")
-    subtree = project / "crates with spaces"
-    subtree.mkdir()
-    root_agents = project / "AGENTS.md"
-    scoped_agents = subtree / "AGENTS.md"
-    root_agents.write_bytes(b"Root guidance\n")
-    scoped_agents.write_bytes(b"Scoped guidance\n")
-    _configure(project, source, revision, [".", subtree.name])
-    monkeypatch.chdir(subtree)
-
-    assert main(["plugins", "update"]) == 0
-    assert b"Scope-specific policy." in root_agents.read_bytes()
-    assert b"Scope-specific policy." in scoped_agents.read_bytes()
-
-    _configure(project, source, revision, [])
-    assert main(["plugins", "update"]) == 0
-    assert root_agents.read_bytes() == b"Root guidance\n"
-    assert scoped_agents.read_bytes() == b"Scoped guidance\n"
-
-
-def test_sync_rejects_invalid_scope_before_writing(
-    project: Path, source: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    revision = _commit(source, "Scope-specific policy.\n")
-    _configure(project, source, revision, [".", "../other"])
+    monkeypatch.chdir(tmp_path)
     assert main(["plugins", "update"]) == 1
-    assert "worktree scope" in capsys.readouterr().err
-    assert not (project / "AGENTS.md").exists()
-
-
-def test_sync_refuses_incomplete_markers_without_writing(
-    project: Path, source: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    revision = _commit(source, "Scope-specific policy.\n")
-    _configure(project, source, revision, ["."])
-    path = project / "AGENTS.md"
-    original = b"# Team\n<!-- tjentic:standards:start -->\n"
-    path.write_bytes(original)
-    assert main(["plugins", "update"]) == 1
-    assert "Fix the standards markers" in capsys.readouterr().err
-    assert path.read_bytes() == original
+    assert "Migrate" in capsys.readouterr().err
+    assert not (tmp_path / "AGENTS.md").exists()
