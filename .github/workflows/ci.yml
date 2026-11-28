@@ -33,12 +33,19 @@ jobs:
           test "$(readlink CLAUDE.md)" = AGENTS.md
           test -s AGENTS.md
           test -s plans/migration/PLAN.md
+      - name: Check the Rust listener
+        working-directory: listener
+        run: |
+          cargo fmt --all --check
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          cargo test --locked --all-features
       - run: uv sync --locked
       - run: uv run --locked ruff format --check
       - run: uv run --locked ruff check
       - run: uv run --locked mypy
       - run: uv run --locked pytest
-      - run: uv build --wheel
+      - run: uv build
+      - run: uv run --locked tj --version
       - run: uv run --locked tj plugins update --help
       - name: Check the project against its pinned Python standards
         run: |

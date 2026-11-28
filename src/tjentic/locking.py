@@ -7,7 +7,7 @@ from tjentic.errors import TjenticError
 
 
 @contextmanager
-def exclusive(path: Path) -> Iterator[None]:
+def exclusive(path: Path, *, busy_message: str | None = None) -> Iterator[None]:
     """Release the cross-process lock on exit, including after a process crash."""
     with path.open("a+b") as lock:
         try:
@@ -21,5 +21,7 @@ def exclusive(path: Path) -> Iterator[None]:
 
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as error:
-            raise TjenticError(f"Another operation holds {path}.") from error
+            raise TjenticError(
+                busy_message or f"Another operation holds {path}."
+            ) from error
         yield

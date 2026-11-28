@@ -1,0 +1,4 @@
+ALTER TABLE items RENAME COLUMN name TO id;
+ALTER TABLE items ADD COLUMN name TEXT;
+UPDATE items SET name=id;
+ALTER TABLE items ADD COLUMN host TEXT NOT NULL DEFAULT 'codex';
