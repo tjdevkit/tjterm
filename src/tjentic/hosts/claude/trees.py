@@ -31,11 +31,40 @@ def published_tree(
             source.location, revision, source.subdirectory, environment
         )
 
-    key = hashlib.sha256(source.location.encode("utf-8")).hexdigest()
+    ref = source.ref if catalog.revisions[identity] is None else None
+    namespace = f"{source.location}\0{ref}" if ref else source.location
+    key = hashlib.sha256(namespace.encode("utf-8")).hexdigest()
     store = Host.CLAUDE.profile(environment) / "tjentic" / "publisher-trees" / key
+    proof = f"refs/tjentic/{revision}"
+
+    def verified_tree() -> PackageTree:
+        if ref:
+            target = subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "core.longpaths=true",
+                    "--no-replace-objects",
+                    "rev-parse",
+                    "--verify",
+                    f"{proof}^{{commit}}",
+                ],
+                cwd=store,
+                env={**environment, "GIT_NO_LAZY_FETCH": "1", "GIT_ALLOW_PROTOCOL": ""},
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+            )
+            if target.returncode or target.stdout.strip() != revision:
+                raise TreeError(
+                    f"{identity} at {revision} does not match publisher ref {ref}."
+                )
+        return PackageTree.read(store, revision, source.subdirectory, environment)
+
     if (store / "HEAD").is_file():
         try:
-            return PackageTree.read(store, revision, source.subdirectory, environment)
+            return verified_tree()
         except TreeError:
             pass  # Setup can reacquire an incomplete object store.
     if not acquire:
@@ -56,12 +85,12 @@ def published_tree(
             "--filter=blob:none",
             "--",
             source.location,
-            f"{revision}:refs/tjentic/{revision}",
+            f"+{ref or revision}:{proof}",
         ],
     ):
         try:
             result = subprocess.run(
-                ["git", "--no-replace-objects", *args],
+                ["git", "-c", "core.longpaths=true", "--no-replace-objects", *args],
                 cwd=store,
                 env={**environment, "GIT_TERMINAL_PROMPT": "0"},
                 capture_output=True,
@@ -76,4 +105,4 @@ def published_tree(
             raise TreeError(
                 f"Cannot acquire the selected Git tree for {identity} at {revision}."
             )
-    return PackageTree.read(store, revision, source.subdirectory, environment)
+    return verified_tree()

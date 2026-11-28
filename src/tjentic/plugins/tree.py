@@ -57,7 +57,15 @@ class PackageTree:
         cls, checkout: Path, revision: str, subdir: str, environment: Mapping[str, str]
     ) -> "PackageTree":
         result = subprocess.run(
-            ["git", "--no-replace-objects", "ls-tree", "-rtz", f"{revision}:{subdir}"],
+            [
+                "git",
+                "-c",
+                "core.longpaths=true",
+                "--no-replace-objects",
+                "ls-tree",
+                "-rtz",
+                f"{revision}:{subdir}",
+            ],
             cwd=checkout,
             env={**environment, "GIT_NO_LAZY_FETCH": "1", "GIT_ALLOW_PROTOCOL": ""},
             capture_output=True,
