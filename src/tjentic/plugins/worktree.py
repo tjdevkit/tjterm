@@ -13,7 +13,7 @@ from tjentic.errors import TjenticError
 from tjentic.hosts.host import Host
 from tjentic.plugins.catalog import Catalog, ReadFile, read_file
 
-type Select = Callable[[Catalog, Path, ReadFile], list[str]]
+type Select = Callable[[Path, Path, ReadFile], Catalog | None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,13 +138,11 @@ def checked_selection(
     repo = _Repository.discover(directory, environment)
     if repo is None:
         return None, []
-    catalog = Catalog.read(repo.root)
-    active = select(catalog, directory, read_file) if catalog else []
+    catalog = select(repo.root, directory, read_file)
+    active = sorted(catalog.revisions) if catalog else []
     default = repo.default()
-    if default and (policy := Catalog.read(repo.root, default.read)):
-        missing = sorted(
-            set(select(policy, directory, default.read)).difference(active)
-        )
+    if default and (policy := select(repo.root, directory, default.read)):
+        missing = sorted(set(policy.revisions).difference(active))
         if missing:
             raise TjenticError(
                 f"This checkout is missing {host} contributor plugins selected on "

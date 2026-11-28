@@ -7,6 +7,7 @@
 import gzip
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -15,6 +16,7 @@ from pathlib import Path
 
 import pexpect
 from compression import zstd
+from native_project_switches import verify_project_switches
 
 PROMPT = "Verify the project's startup standards."
 
@@ -38,38 +40,16 @@ def run(
     return result
 
 
-def expected_rules(
-    project: Path, temporary: Path, env: dict[str, str]
-) -> dict[str, str]:
-    catalog = json.loads(
-        (project / ".claude-plugin/marketplace.json").read_text(encoding="utf-8")
-    )
-    rules = {}
-    for plugin in catalog["plugins"]:
-        package = temporary / plugin["name"]
-        source = plugin["source"]
-        run(temporary, env, "git", "init", "--quiet", str(package))
-        run(
-            package,
-            env,
-            "git",
-            "fetch",
-            "--quiet",
-            "--depth=1",
-            source["url"],
-            source["sha"],
-        )
-        run(package, env, "git", "checkout", "--quiet", "--detach", source["sha"])
-        conventions = package / "standards/convention"
-        if not (conventions / "domain-design.md").is_file():
-            raise ValueError(f"Missing domain-design convention in {plugin['name']}")
-        for path in conventions.glob("*.md"):
-            rules[f"{package.name}/{path.name}"] = path.read_text(
-                encoding="utf-8"
-            ).strip()
-    if not rules:
-        raise ValueError("The selected sources contain no conventions")
-    return rules
+def publisher_reference(
+    project: Path, env: dict[str, str], host: str, *args: str
+) -> str:
+    """Read project selection or capture its publishers' startup text."""
+    launcher = shutil.which("tj", path=env["PATH"])
+    if not launcher:
+        raise RuntimeError("Install the candidate wheel in the fixture environment")
+    python = Path(launcher).resolve().with_name("python")
+    reference = Path(__file__).with_name("capture_publisher_context.py")
+    return run(project, env, str(python), str(reference), host, *args).stdout
 
 
 def occurrences(value: object, text: str) -> int:
@@ -114,6 +94,7 @@ def check_request(
     server: Capture,
     rules: dict[str, str],
     expected: int,
+    excluded: dict[str, str] | None = None,
 ) -> None:
     server.requests.clear()
     if host == "codex":
@@ -139,7 +120,13 @@ def check_request(
         raise AssertionError(
             f"{project.name} {host}: expected {expected} of each rule, got {counts}"
         )
-    print(f"{host} in {project.name}: {len(rules)} conventions, {expected} copies each")
+    for name, rule in (excluded or {}).items():
+        if occurrences(packets[0], rule):
+            raise AssertionError(f"{project.name} {host}: unexpected rule from {name}")
+    print(
+        f"{host} in {project.name}: {len(rules)} rules with {expected} copies each, "
+        f"{len(excluded or {})} other rules absent"
+    )
 
 
 def review_fixture_hooks(project: Path, env: dict[str, str]) -> None:
@@ -210,17 +197,28 @@ def verify(root: Path, temp: Path, server: Capture, search_path: str) -> None:
         ),
         encoding="utf-8",
     )
-    rules = expected_rules(project, temp, env)
+    project_rules = {}
     for host in ("codex", "claude"):
+        selected = json.loads(publisher_reference(project, env, host, "--selected"))
+        if not selected:
+            continue
         command = ("tj", "plugins", "check", "--host", host)
         if run(project, env, *command, check=False).returncode == 0:
             raise AssertionError(f"{host} accepted missing standards")
         run(project, env, "tj", "plugins", "update", "--host", host)
+        reviewed = False
         if host == "codex":
-            if run(project, env, *command, check=False).returncode == 0:
-                raise AssertionError("Codex accepted unreviewed hooks")
-            review_fixture_hooks(project, env)
+            status = run(project, env, *command, check=False)
+            if status.returncode:
+                if "untrusted" not in status.stderr:
+                    raise RuntimeError(status.stderr)
+                review_fixture_hooks(project, env)
+                reviewed = True
         run(project, env, *command)
+        rules = json.loads(publisher_reference(project, env, host))
+        if host == "codex" and rules and not reviewed:
+            raise AssertionError("Codex accepted unreviewed startup hooks")
+        project_rules.update(rules)
         profile_record = (
             codex_home / "config.toml"
             if host == "codex"
@@ -232,6 +230,16 @@ def verify(root: Path, temp: Path, server: Capture, search_path: str) -> None:
             raise AssertionError(f"{host} changed its configuration on repeated update")
         check_request(host, project, env, server, rules, 1)
         check_request(host, control, env, server, rules, 0)
+    verify_project_switches(
+        temp,
+        env,
+        server,
+        control,
+        project_rules,
+        run,
+        review_fixture_hooks,
+        check_request,
+    )
 
 
 def main() -> None:

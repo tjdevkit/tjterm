@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -7,12 +8,14 @@ from pathlib import Path
 import pytest
 
 from tjentic.errors import TjenticError
+from tjentic.hosts.claude import plugins as claude
+from tjentic.hosts.claude.trees import published_tree
 from tjentic.hosts.codex import plugins as codex
 from tjentic.hosts.codex.server import codex_server
 from tjentic.hosts.host import Host
 from tjentic.standards import verify
 
-IDENTITY = "rust@project"
+IDENTITY = "team@project"
 
 
 def save(path: Path, value: object) -> None:
@@ -53,6 +56,7 @@ def checkout(tmp_path: Path) -> Path:
         plugin / "hooks" / "hooks.json",
         {"hooks": {"SessionStart": [{"hooks": handlers}]}},
     )
+    save(plugin / ".claude-plugin/plugin.json", {"name": "team"})
     git(plugin, "init", "-q")
     git(plugin, "add", ".")
     git(plugin, "commit", "-qm", "plugin")
@@ -61,14 +65,21 @@ def checkout(tmp_path: Path) -> Path:
         {
             "name": "project",
             "plugins": [
-                {"name": "rust", "source": {"sha": git(plugin, "rev-parse", "HEAD")}},
+                {
+                    "name": "team",
+                    "source": {
+                        "source": "url",
+                        "url": plugin.as_uri(),
+                        "sha": git(plugin, "rev-parse", "HEAD"),
+                    },
+                },
             ],
         },
     )
     save(project / ".claude" / "settings.json", {"enabledPlugins": {IDENTITY: True}})
     (project / ".codex").mkdir()
     (project / ".codex" / "config.toml").write_text(
-        '[plugins."rust@project"]\nenabled=true\n', encoding="utf-8"
+        '[plugins."team@project"]\nenabled=true\n', encoding="utf-8"
     )
     return project
 
@@ -81,8 +92,15 @@ def codex_fixture(
     checkout: Path,
     monkeypatch: pytest.MonkeyPatch,
     mode: str,
+    registered: list[tuple[Path, str]] | None = None,
+    skill: Path | None = None,
+    matcher: str | None = None,
 ) -> None:
     plugin = checkout.parent / "plugin"
+    if registered is None:
+        registered = [
+            (plugin / "hooks/hooks.json", word) for word in ("first", "second")
+        ]
     rows = [
         {
             "key": name,
@@ -90,14 +108,14 @@ def codex_fixture(
             "source": "plugin",
             "pluginId": IDENTITY,
             "eventName": "sessionStart",
-            "sourcePath": str(plugin / "hooks" / "hooks.json"),
+            "sourcePath": str(path),
             "handlerType": "command",
             "enabled": mode != "disabled",
             "async": False,
-            "matcher": None,
+            "matcher": matcher,
             "trustStatus": mode if mode in ("untrusted", "modified") else "trusted",
         }
-        for name in ("first", "second")
+        for path, name in registered
     ]
     if mode == "partial":
         rows.pop()
@@ -119,6 +137,37 @@ def codex_fixture(
         {
             "initialize": {},
             "config/read": {"config": {"features": {"hooks": mode != "off"}}},
+            "plugin/installed": {
+                "marketplaces": [
+                    {
+                        "plugins": [
+                            {
+                                "id": IDENTITY,
+                                "installed": True,
+                                "enabled": mode != "plugin-off",
+                            }
+                        ]
+                    }
+                ]
+            },
+            "skills/list": {
+                "data": [
+                    {
+                        "cwd": str(checkout),
+                        "skills": (
+                            [
+                                {
+                                    "pluginId": IDENTITY,
+                                    "enabled": True,
+                                    "path": str(skill),
+                                }
+                            ]
+                            if skill is not None
+                            else []
+                        ),
+                    }
+                ]
+            },
             "hooks/list": {
                 "data": [{"cwd": str(checkout), "hooks": rows, "errors": []}]
             },
@@ -135,6 +184,7 @@ def codex_fixture(
         ("disabled", "disabled"),
         ("partial", "Incomplete"),
         ("off", "Enable"),
+        ("plugin-off", "disabled"),
         ("alias", "both register"),
     ],
 )
@@ -166,15 +216,30 @@ def claude_fixture(
     monkeypatch: pytest.MonkeyPatch,
     projects: list[Path],
     policy: str = "enabled",
+    commands: tuple[str, ...] = ("first", "second"),
+    matcher: str = "",
 ) -> None:
     plugin = checkout.parent / "plugin"
+    installed = checkout.parent / "native-claude-cache"
+    shutil.copytree(
+        plugin, installed, ignore=shutil.ignore_patterns(".git"), dirs_exist_ok=True
+    )
+    catalog = claude.selected(checkout, checkout)
+    assert catalog is not None
+    published_tree(
+        catalog,
+        IDENTITY,
+        git(plugin, "rev-parse", "HEAD"),
+        environment(checkout),
+        acquire=True,
+    )
     rows = [
         {
             "id": IDENTITY,
             "scope": "local",
             "enabled": True,
             "projectPath": str(project),
-            "installPath": str(plugin),
+            "installPath": str(installed),
         }
         for project in projects
     ]
@@ -202,10 +267,10 @@ def claude_fixture(
                     "event": "SessionStart",
                     "type": "command",
                     "pluginName": IDENTITY,
-                    "matcher": "",
+                    "matcher": matcher,
                     "commandText": word,
                 }
-                for word in ("first", "second")
+                for word in commands
             ],
             "policy": {
                 "allDisabled": policy == "allDisabled",
@@ -281,3 +346,199 @@ def test_check_startup_rejects_modified_codex_package(
     manifest.write_text("{}", encoding="utf-8")
     with pytest.raises(TjenticError, match="differ from its Git revision"):
         verify(Host.CODEX, checkout, environment(checkout))
+
+
+def repin(checkout: Path) -> None:
+    publisher = checkout.parent / "plugin"
+    git(publisher, "add", ".")
+    git(publisher, "commit", "-qm", "publish new layout")
+    catalog = checkout / ".claude-plugin/marketplace.json"
+    document = json.loads(catalog.read_text(encoding="utf-8"))
+    document["plugins"][0]["source"]["sha"] = git(publisher, "rev-parse", "HEAD")
+    save(catalog, document)
+
+
+@pytest.mark.parametrize(
+    "registered_source", ["declared", "wrong", "partial", "untrusted"]
+)
+def test_codex_uses_its_declared_hook_sources(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch, registered_source: str
+) -> None:
+    publisher = checkout.parent / "plugin"
+    primary = publisher / ".codex-plugin/hooks.json"
+    other = publisher / "native/company/start.json"
+    custom = '"$PLUGIN_ROOT"/read company-policy'
+    paths = [primary, other]
+    save(
+        publisher / ".codex-plugin/plugin.json",
+        {
+            "name": "team",
+            "hooks": [f"./{path.relative_to(publisher).as_posix()}" for path in paths],
+        },
+    )
+    for path, command in ((primary, custom), (other, "other")):
+        save(
+            path,
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {"hooks": [{"type": "command", "command": command}]}
+                    ]
+                }
+            },
+        )
+    repin(checkout)
+    path = publisher / "hooks/hooks.json" if registered_source == "wrong" else primary
+    native = [(path, custom), (other, "other")]
+    mode = "untrusted" if registered_source == "untrusted" else "trusted"
+    codex_fixture(
+        checkout,
+        monkeypatch,
+        mode,
+        native[:1] if registered_source == "partial" else native,
+    )
+    if registered_source == "declared":
+        verify(Host.CODEX, checkout, environment(checkout))
+    else:
+        with pytest.raises(TjenticError, match=r"untrusted|Incomplete"):
+            verify(Host.CODEX, checkout, environment(checkout))
+
+
+def test_claude_verifies_exec_arguments_and_merged_inline_hooks(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    publisher = checkout.parent / "plugin"
+    hook = {
+        "type": "command",
+        "command": "${CLAUDE_PLUGIN_ROOT}/reader",
+        "args": ["rules for this team"],
+    }
+    save(
+        publisher / ".claude-plugin/plugin.json",
+        {"name": "team", "hooks": {"SessionStart": [{"hooks": [hook]}]}},
+    )
+    repin(checkout)
+    for command in (
+        "${CLAUDE_PLUGIN_ROOT}/reader rules for this team",
+        "${CLAUDE_PLUGIN_ROOT}/reader",
+    ):
+        claude_fixture(
+            checkout, monkeypatch, [checkout], commands=("first", "second", command)
+        )
+        if command.endswith("team"):
+            verify(Host.CLAUDE, checkout, environment(checkout))
+        else:
+            with pytest.raises(TjenticError, match="Incomplete"):
+                verify(Host.CLAUDE, checkout, environment(checkout))
+
+
+@pytest.mark.parametrize("host", list(Host))
+def test_skill_only_install_is_verified_without_a_startup_hook(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch, host: Host
+) -> None:
+    publisher = checkout.parent / "plugin"
+    (publisher / "hooks/hooks.json").unlink()
+    (publisher / "hooks").rmdir()
+    skill = publisher / "skills/team/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("A team skill.", encoding="utf-8")
+    repin(checkout)
+    if host is Host.CODEX:
+        codex_fixture(checkout, monkeypatch, "trusted", [], skill)
+    else:
+        claude_fixture(checkout, monkeypatch, [checkout], commands=())
+    verify(host, checkout, environment(checkout))
+    if host is Host.CODEX:
+        codex_fixture(checkout, monkeypatch, "trusted", [])
+    else:
+        claude_fixture(checkout, monkeypatch, [], commands=())
+    with pytest.raises(TjenticError, match="missing"):
+        verify(host, checkout, environment(checkout))
+
+
+@pytest.mark.parametrize(
+    "receipt_state", ["native", "wrong revision", "extra untracked"]
+)
+def test_codex_validates_native_marketplace_acquisition_receipt(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch, receipt_state: str
+) -> None:
+    plugin = checkout.parent / "plugin"
+    source = "https://registry.invalid/team.git"
+    git(plugin, "remote", "add", "origin", source)
+    revision = git(plugin, "rev-parse", "HEAD")
+    save(
+        plugin / ".codex-marketplace-install.json",
+        {
+            "source_type": "git",
+            "source": source,
+            "ref_name": None,
+            "sparse_paths": [],
+            "revision": "0" * 40 if receipt_state == "wrong revision" else revision,
+        },
+    )
+    if receipt_state == "extra untracked":
+        (plugin / "unexpected").write_text("extra", encoding="utf-8")
+    codex_fixture(checkout, monkeypatch, "trusted")
+    if receipt_state == "native":
+        verify(Host.CODEX, checkout, environment(checkout))
+    else:
+        with pytest.raises(TjenticError, match="differ from its Git revision"):
+            verify(Host.CODEX, checkout, environment(checkout))
+
+
+@pytest.mark.parametrize("host", list(Host))
+@pytest.mark.parametrize("registered", ["startup", "resume"])
+def test_preflight_preserves_the_publishers_session_matcher(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch, host: Host, registered: str
+) -> None:
+    publisher = checkout.parent / "plugin"
+    path = publisher / "hooks/hooks.json"
+    package = json.loads(path.read_text(encoding="utf-8"))
+    package["hooks"]["SessionStart"][0]["matcher"] = "startup"
+    save(path, package)
+    git(publisher, "commit", "-qam", "Run the publisher commands on a new session")
+    market = checkout / ".claude-plugin/marketplace.json"
+    selection = json.loads(market.read_text(encoding="utf-8"))
+    selection["plugins"][0]["source"]["sha"] = git(publisher, "rev-parse", "HEAD")
+    save(market, selection)
+    if host is Host.CODEX:
+        codex_fixture(checkout, monkeypatch, "trusted", matcher=registered)
+    else:
+        claude_fixture(checkout, monkeypatch, [checkout], matcher=registered)
+    if registered == "startup":
+        verify(host, checkout, environment(checkout))
+    else:
+        with pytest.raises(TjenticError, match="Incomplete native SessionStart"):
+            verify(host, checkout, environment(checkout))
+
+
+def test_claude_blocks_missing_default_hook_from_pinned_install(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    claude_fixture(checkout, monkeypatch, [checkout], commands=())
+    (checkout.parent / "native-claude-cache/hooks/hooks.json").unlink()
+    with pytest.raises(TjenticError, match="Incomplete installed plugin"):
+        verify(Host.CLAUDE, checkout, environment(checkout))
+
+
+def test_floating_codex_package_requires_the_declared_remote_and_ref(
+    checkout: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = "https://example.org/team/selected.git"
+    plugin = checkout.parent / "plugin"
+    git(plugin, "branch", "-M", "main")
+    git(plugin, "remote", "add", "origin", "https://example.org/another.git")
+    manifest = checkout / ".claude-plugin/marketplace.json"
+    market = json.loads(manifest.read_bytes())
+    entry = {"source": "url", "url": source, "ref": "release"}
+    market["plugins"][0]["source"] = entry
+    save(manifest, market)
+    codex_fixture(checkout, monkeypatch, "trusted")
+    with pytest.raises(TjenticError, match="different Git source"):
+        verify(Host.CODEX, checkout, environment(checkout))
+    git(plugin, "remote", "set-url", "origin", source)
+    with pytest.raises(TjenticError, match="needs release"):
+        verify(Host.CODEX, checkout, environment(checkout))
+    git(plugin, "tag", "release", "HEAD")
+    verify(Host.CODEX, checkout, environment(checkout))

@@ -18,8 +18,17 @@ from tjentic.plugins.worktree import checked_selection
 
 class _Adapter(Protocol):
     def selected(
-        self, catalog: Catalog, directory: Path, read: ReadFile = read_file
-    ) -> list[str]: ...
+        self, root: Path, directory: Path, read: ReadFile = read_file
+    ) -> Catalog | None: ...
+
+    def resolve(
+        self,
+        catalog: Catalog,
+        directory: Path,
+        environment: Mapping[str, str],
+        *,
+        refresh: bool,
+    ) -> Catalog: ...
 
     def update(
         self,
@@ -66,6 +75,9 @@ def verify(host: Host, directory: Path, environment: Mapping[str, str]) -> None:
     catalog, plugins = checked_selection(directory, host, adapter.selected, environment)
     if catalog is not None and plugins:
         catalog.check_legacy(directory)
+        catalog = adapter.resolve(
+            catalog, directory.resolve(), environment, refresh=False
+        )
         adapter.check_startup(catalog, directory.resolve(), plugins, environment)
 
 
@@ -83,14 +95,24 @@ def run(
         return
     if args.plugins_action == "update":
         for identity in plugins:
-            print(f"{identity} {catalog.revisions[identity]}", flush=True)
+            publisher = catalog.marketplaces.get(identity.partition("@")[2])
+            expected = catalog.revisions[identity]
+            if publisher and publisher.ref:
+                expected = f"marketplace ref {publisher.ref}"
+            print(f"{identity} {expected or 'publisher revision'}", flush=True)
         if args.dry_run:
             return
         profile = host.profile(environment)
         profile.mkdir(parents=True, exist_ok=True)
         with exclusive(profile / "tj-plugin-update.lock"):
+            catalog = adapter.resolve(
+                catalog, directory.resolve(), environment, refresh=True
+            )
             adapter.update(catalog, directory.resolve(), plugins, environment)
         print(f"Run tj plugins check --host {host} before starting a new session.")
     else:
+        catalog = adapter.resolve(
+            catalog, directory.resolve(), environment, refresh=False
+        )
         adapter.check_startup(catalog, directory.resolve(), plugins, environment)
         print(f"Verified {len(plugins)} {host} contributor plugins for {directory}.")

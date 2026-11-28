@@ -1,5 +1,4 @@
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -32,15 +31,10 @@ def _git(directory: Path, *args: str) -> str:
 
 
 @pytest.fixture
-def adopted(tmp_path: Path) -> Path:
-    primary = tmp_path / "project"
-    primary.mkdir()
-    _git(primary, "init", "-q", "--initial-branch=trunk")
+def adopted(editorial: Path) -> Path:
+    primary = editorial
     _git(primary, "commit", "--allow-empty", "-qm", "Before adoption")
     _git(primary, "tag", "before-adoption")
-    project = Path(__file__).resolve().parents[1]
-    for name in (".claude-plugin", ".claude", ".codex"):
-        shutil.copytree(project / name, primary / name)
     _git(primary, "add", ".")
     _git(primary, "commit", "-qm", "Adopt the contributor standards")
     return primary
@@ -65,7 +59,7 @@ def test_pre_adoption_worktree_stops_at_launch_and_update(
     ) as failure:
         verify(host, child, {})
     assert "primary worktree HEAD" in str(failure.value)
-    assert "python@tjentic-project, rust@tjentic-project" in str(failure.value)
+    assert "captions@editorial, voice@editorial" in str(failure.value)
     monkeypatch.chdir(child)
     assert main(["plugins", "update", "--dry-run", "--host", host]) == 1
     assert str(failure.value) in capsys.readouterr().err
@@ -87,13 +81,13 @@ def test_remote_default_with_old_primary_and_partial_host_selection(
     _git(adopted, "branch", "-f", "trunk", "before-adoption")
     config = checkout / ".codex/config.toml"
     config.write_text(
-        '[plugins."python@tjentic-project"]\nenabled = true\n', encoding="utf-8"
+        '[plugins."captions@editorial"]\nenabled = true\n', encoding="utf-8"
     )
     with pytest.raises(
-        TjenticError, match="refs/remotes/origin/trunk: rust@tjentic-project"
+        TjenticError, match="refs/remotes/origin/trunk: voice@editorial"
     ) as failure:
         verify(Host.CODEX, checkout, {})
-    assert "python@tjentic-project" not in str(failure.value)
+    assert "captions@editorial" not in str(failure.value)
 
 
 def test_new_local_default_policy_is_checked_before_it_is_pushed(
@@ -106,7 +100,7 @@ def test_new_local_default_policy_is_checked_before_it_is_pushed(
     )
     checkout = tmp_path / "sibling"
     _git(adopted, "worktree", "add", "-q", "--detach", str(checkout), "before-adoption")
-    with pytest.raises(TjenticError, match="refs/heads/trunk: python@tjentic-project"):
+    with pytest.raises(TjenticError, match="refs/heads/trunk: captions@editorial"):
         verify(Host.CLAUDE, checkout, {})
 
 
@@ -121,12 +115,12 @@ def test_branch_can_update_a_pin_while_keeping_the_required_selection(
     market = checkout / ".claude-plugin/marketplace.json"
 
     catalog = json.loads(market.read_bytes())
-    catalog["plugins"][0]["source"]["sha"] = "1" * 40
+    catalog["plugins"][0]["source"]["sha"] = "e" * 40
     market.write_text(json.dumps(catalog), encoding="utf-8")
     monkeypatch.chdir(checkout)
     for host in Host:
         assert main(["plugins", "update", "--dry-run", "--host", host]) == 0
-        assert "1" * 40 in capsys.readouterr().out
+        assert "e" * 40 in capsys.readouterr().out
 
 
 def test_unrelated_project_with_no_policy_can_launch(tmp_path: Path) -> None:
@@ -147,16 +141,16 @@ def test_existing_root_policy_allows_intentional_subdirectory_selection(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    child = adopted / "python-only"
+    child = adopted / "captions-only"
     config = child / ".codex/config.toml"
     config.parent.mkdir(parents=True)
     config.write_text(
-        '[plugins."rust@tjentic-project"]\nenabled = false\n', encoding="utf-8"
+        '[plugins."voice@editorial"]\nenabled = false\n', encoding="utf-8"
     )
-    _git(adopted, "add", "python-only")
-    _git(adopted, "commit", "-qm", "Use Python standards in this subdirectory")
+    _git(adopted, "add", "captions-only")
+    _git(adopted, "commit", "-qm", "Select captions in this subdirectory")
     monkeypatch.chdir(child)
     assert main(["plugins", "update", "--dry-run", "--host", "codex"]) == 0
     output = capsys.readouterr().out
-    assert "python@tjentic-project" in output
-    assert "rust@tjentic-project" not in output
+    assert "captions@editorial" in output
+    assert "voice@editorial" not in output
