@@ -82,18 +82,21 @@ def update(
                 )
 
 
-def _git_project(directory: Path) -> Path:
-    project = subprocess.run(
-        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+def _primary_worktree(directory: Path) -> Path:
+    result = subprocess.run(
+        ["git", "worktree", "list", "--porcelain", "-z"],
         cwd=directory,
         capture_output=True,
         text=True,
         encoding="utf-8",
         check=False,
     )
-    return (
-        Path(project.stdout.strip()).resolve() if not project.returncode else directory
-    )
+    record = result.stdout.partition("\0")[0]
+    if result.returncode or not record.startswith("worktree "):
+        raise StartupError(
+            f"Git could not identify the primary worktree for {directory}."
+        )
+    return Path(record.removeprefix("worktree ")).resolve()
 
 
 def _claude_rows(
@@ -126,6 +129,8 @@ def _claude_installation(
     identity: str,
     main_project: Path,
     profile: Path,
+    *,
+    selected: bool = True,
 ) -> Installation | None:
     applicable: list[tuple[tuple[int, int], dict[str, object]]] = []
     for row in rows:
@@ -158,6 +163,8 @@ def _claude_installation(
         )
     row = matches[0]
     if row.get("enabled") is not True:
+        if not selected:
+            return None
         raise StartupError(f"Enable {identity} in Claude for {directory}.")
     registry = as_object(
         read_object(profile / "plugins" / "installed_plugins.json").get("plugins")
@@ -170,13 +177,15 @@ def _claude_installation(
             revision, path = entry.get("gitCommitSha"), entry.get("installPath")
             if isinstance(revision, str) and isinstance(path, str):
                 return Installation(Path(path), revision)
+    if not selected:
+        return None
     raise StartupError(f"Claude has no matching Git install receipt for {identity}.")
 
 
 def _control(
     directory: Path, environment: Mapping[str, str], method: str
 ) -> dict[str, object]:
-    """Ask Claude for its effective settings without authentication, hooks or a prompt."""
+    """Read effective policy without authentication, hooks or a model prompt."""
     request = {
         "type": "control_request",
         "request_id": "tj",
@@ -218,25 +227,25 @@ def _control(
     raise StartupError(f"Claude did not report {method} in {directory}.")
 
 
-def _claude_policy(
+def _claude_hooks(
     directory: Path, plugins: Sequence[str], environment: Mapping[str, str]
-) -> None:
+) -> list[dict[str, object]]:
     for variable in ("CLAUDE_CODE_SIMPLE", "CLAUDE_CODE_SAFE_MODE"):
         if environment.get(variable, "").lower() in ("true", "on", "yes", "1"):
             raise StartupError(f"{variable} disables Claude plugin hooks.")
-    policy = as_object(
-        _control(directory, environment, "get_hooks_listing").get("policy")
-    )
+    listing = _control(directory, environment, "get_hooks_listing")
+    policy = as_object(listing.get("policy"))
     for key in ("allDisabled", "managedOnly", "disabledByPolicy"):
         if not isinstance(policy.get(key), bool):
             raise StartupError("Claude returned an unknown hook policy.")
     if policy["disabledByPolicy"]:
         raise StartupError("Claude's managed policy disables all configured hooks.")
+    forced: dict[str, object] | None = None
     if policy["allDisabled"] or policy["managedOnly"]:
         sources = as_rows(
             _control(directory, environment, "get_settings").get("sources")
         )
-        forced: dict[str, object] = {}
+        forced = {}
         for source in sources:
             if source.get("source") == "policySettings":
                 settings = as_object(source.get("settings"))
@@ -245,6 +254,13 @@ def _claude_policy(
             raise StartupError(
                 "Claude's effective settings restrict the selected plugin hooks."
             )
+    return [
+        hook
+        for hook in as_rows(listing.get("hooks"))
+        if hook.get("source") == "pluginHook"
+        and hook.get("event") == "SessionStart"
+        and (forced is None or forced.get(str(hook.get("pluginName"))) is True)
+    ]
 
 
 def installed_revision(
@@ -255,7 +271,7 @@ def installed_revision(
         rows,
         directory,
         identity,
-        _git_project(directory).parent,
+        _primary_worktree(directory),
         HOST.profile(environment),
     )
     return install.revision if install else None
@@ -267,12 +283,35 @@ def check_startup(
     plugins: Sequence[str],
     environment: Mapping[str, str],
 ) -> None:
-    _claude_policy(directory, plugins, environment)
+    hooks = _claude_hooks(directory, plugins, environment)
     rows = _claude_rows(directory, environment)
-    main_project = _git_project(directory).parent
+    main_project = _primary_worktree(directory)
     profile = HOST.profile(environment)
     for identity in plugins:
         install = _claude_installation(rows, directory, identity, main_project, profile)
-        require_revision(
+        selected_install = require_revision(
             identity, install, catalog.revisions[identity]
-        ).startup_commands()
+        )
+        selected = [hook for hook in hooks if hook.get("pluginName") == identity]
+        selected_install.check_commands(
+            identity,
+            (
+                str(hook.get("commandText"))
+                for hook in selected
+                if hook.get("type") == "command"
+                and hook.get("matcher") in (None, "", "*")
+            ),
+        )
+        commands = {str(hook.get("commandText")) for hook in selected}
+        aliases = {
+            other
+            for hook in hooks
+            if isinstance(other := hook.get("pluginName"), str)
+            and hook.get("commandText") in commands
+            and other != identity
+        }
+        for other in aliases:
+            alias = _claude_installation(
+                rows, directory, other, main_project, profile, selected=False
+            )
+            selected_install.check_alias(identity, other, alias)
