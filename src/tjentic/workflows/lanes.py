@@ -8,9 +8,9 @@ from enum import StrEnum
 from pathlib import Path
 
 from tjentic.errors import TjenticError
+from tjentic.hosts.host import Host
 from tjentic.sessions import claude, codex
 from tjentic.sessions.codex import ModelSettings, OpenedSession
-from tjentic.sessions.hosts import Host
 
 
 class WorkKind(StrEnum):

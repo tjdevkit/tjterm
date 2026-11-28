@@ -9,8 +9,8 @@ from pathlib import Path
 
 from tjentic import standards
 from tjentic.errors import TjenticError
+from tjentic.hosts.host import Host
 from tjentic.sessions.history import SubmittedPrompt
-from tjentic.sessions.hosts import Host
 from tjentic.watch.native import Watch, listener_path
 from tjentic.workflows.checks import verify_tree, worktree
 from tjentic.workflows.handoff import assign_recipient, transfer

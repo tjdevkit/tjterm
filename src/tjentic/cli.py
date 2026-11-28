@@ -11,9 +11,9 @@ from uuid import UUID
 
 from tjentic import standards
 from tjentic.errors import TjenticError
+from tjentic.hosts.host import Host
 from tjentic.sessions import claude
 from tjentic.sessions.codex import Session, connect, terminal
-from tjentic.sessions.hosts import Host
 from tjentic.watch.native import Watch, listener_path
 from tjentic.workspaces import Workspace
 

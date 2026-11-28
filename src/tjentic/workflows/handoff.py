@@ -8,9 +8,9 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from tjentic.errors import TjenticError
+from tjentic.hosts.host import Host
 from tjentic.sessions import claude
 from tjentic.sessions.codex import connect
-from tjentic.sessions.hosts import Host
 from tjentic.terminal import Kitty
 from tjentic.watch.native import Watch, listener_path
 from tjentic.workflows.assignment import launch_assignment

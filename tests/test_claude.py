@@ -7,8 +7,8 @@ from uuid import UUID
 import pytest
 
 from tjentic.errors import TjenticError
+from tjentic.hosts.host import Host
 from tjentic.sessions.claude import launch
-from tjentic.sessions.hosts import Host
 
 
 @pytest.mark.parametrize(

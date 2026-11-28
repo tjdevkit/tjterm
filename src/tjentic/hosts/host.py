@@ -31,8 +31,9 @@ class Host(StrEnum):
 
     @classmethod
     def current(cls, environment: Mapping[str, str]) -> Self:
-        if environment.get("TJ_HOST") == cls.CLAUDE:
-            return cls.CLAUDE
+        explicit = environment.get("TJ_HOST")
+        if explicit and explicit in cls:
+            return cls(explicit)
         if environment.get(cls.CODEX.session_variable):
             return cls.CODEX
         if environment.get(cls.CLAUDE.session_variable) or environment.get(

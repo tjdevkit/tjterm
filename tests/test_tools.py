@@ -3,7 +3,7 @@ from uuid import UUID
 
 import pytest
 
-from tjentic.sessions.hosts import Host
+from tjentic.hosts.host import Host
 from tjentic.watch.native import Watch
 from tjentic.watch.tools import response
 

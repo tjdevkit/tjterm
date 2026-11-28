@@ -8,7 +8,7 @@ from pathlib import Path
 from uuid import UUID
 
 from tjentic.errors import TjenticError
-from tjentic.sessions.hosts import Host
+from tjentic.hosts.host import Host
 from tjentic.workflows.checks import git, worktree
 
 

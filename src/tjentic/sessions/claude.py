@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 
 from tjentic import standards
 from tjentic.errors import TjenticError
-from tjentic.sessions.hosts import Host
+from tjentic.hosts.host import Host
 from tjentic.watch.native import Watch
 
 

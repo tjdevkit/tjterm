@@ -8,11 +8,12 @@ from pathlib import Path
 from typing import Protocol
 
 from tjentic.errors import TjenticError
+from tjentic.hosts.claude import plugins as claude
+from tjentic.hosts.codex import plugins as codex
+from tjentic.hosts.host import Host
 from tjentic.locking import exclusive
-from tjentic.plugins import claude, codex
 from tjentic.plugins.catalog import Catalog, ReadFile, read_file
 from tjentic.plugins.worktree import checked_selection
-from tjentic.sessions.hosts import Host
 
 
 class _Adapter(Protocol):

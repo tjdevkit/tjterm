@@ -2,7 +2,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from tjentic.sessions.hosts import Host
+from tjentic.hosts.host import Host
 
 
 @dataclass(slots=True)
