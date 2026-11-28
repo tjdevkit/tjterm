@@ -71,7 +71,9 @@ def test_handoff_assigns_once_and_opens_the_recipient_with_the_task(
         if fail_first:
             terminal.open_tab.side_effect = TjenticError("Kitty launch failed.")
             with pytest.raises(TjenticError, match="Kitty launch failed"):
-                await handoff(args, ["codex"], state, None, config, terminal, None)
+                await handoff(
+                    args, ["codex"], state, None, config, terminal, None, environment={}
+                )
             with database(state) as db:
                 pending = db.execute("SELECT * FROM transfers").fetchone()
                 assert pending["state"] == "offered"
@@ -80,7 +82,10 @@ def test_handoff_assigns_once_and_opens_the_recipient_with_the_task(
             terminal.open_tab.side_effect = None
         for _ in range(2):
             assert (
-                await handoff(args, ["codex"], state, None, config, terminal, None) == 0
+                await handoff(
+                    args, ["codex"], state, None, config, terminal, None, environment={}
+                )
+                == 0
             )
 
     asyncio.run(run())
@@ -116,7 +121,11 @@ def test_handoff_assigns_once_and_opens_the_recipient_with_the_task(
             assert pending["state"] == "offered"
             assert not item(db, pending["item"])["thread"]
         selection.unlink()
-        asyncio.run(handoff(args, ["codex"], state, None, config, terminal, None))
+        asyncio.run(
+            handoff(
+                args, ["codex"], state, None, config, terminal, None, environment={}
+            )
+        )
     with pytest.raises(TjenticError, match="closed before submitting"):
         run_recipient(
             state, identity, [sys.executable, "-c", "raise SystemExit(1)"], {}
@@ -126,7 +135,12 @@ def test_handoff_assigns_once_and_opens_the_recipient_with_the_task(
         assert pending["state"] == "offered"
         assert not item(db, pending["item"])["thread"]
     assert (
-        asyncio.run(handoff(args, ["codex"], state, None, config, terminal, None)) == 0
+        asyncio.run(
+            handoff(
+                args, ["codex"], state, None, config, terminal, None, environment={}
+            )
+        )
+        == 0
     )
     message = {
         "type": "response_item",
@@ -156,7 +170,12 @@ def test_handoff_assigns_once_and_opens_the_recipient_with_the_task(
     subprocess.run(["git", "init", "-q", str(another)], check=True)
     monkeypatch.chdir(another)
     assert (
-        asyncio.run(handoff(args, ["codex"], state, None, config, terminal, None)) == 0
+        asyncio.run(
+            handoff(
+                args, ["codex"], state, None, config, terminal, None, environment={}
+            )
+        )
+        == 0
     )
     with database(state) as db:
         separate = find_item(db, another.resolve(), task)
@@ -222,7 +241,7 @@ def test_retry_reconciles_the_receiver_reply_and_only_moves_one_item(
             WHEN NEW.state='done' BEGIN SELECT RAISE(ABORT,'interrupt receipt'); END
         """)
         with pytest.raises(sqlite3.IntegrityError, match="interrupt receipt"):
-            asyncio.run(dispatch(db, ["codex"], request, presets))
+            asyncio.run(dispatch(db, ["codex"], request, presets, environment={}))
         assert item(db, "X")["thread"] == SENDER
         assert transfer(db, identity)["state"] == "offered"
         assert transfer(db, identity)["receiver"] == str(RECEIVER)
@@ -230,7 +249,9 @@ def test_retry_reconciles_the_receiver_reply_and_only_moves_one_item(
         presets.unlink()
         db.execute("DROP TRIGGER cut_power")
         for _ in range(2):
-            asyncio.run(dispatch(db, ["codex"], transfer(db, identity), presets))
+            asyncio.run(
+                dispatch(db, ["codex"], transfer(db, identity), presets, environment={})
+            )
         host.assess.assert_awaited_once()
         assert host.assess.await_args.args[-1] is Model.LUNA
         assert host.assess.await_args.kwargs["effort"] == "low"

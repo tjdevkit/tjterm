@@ -1,6 +1,5 @@
 import asyncio
 import json
-import os
 import re
 import subprocess
 import tempfile
@@ -482,10 +481,8 @@ async def connect(
     command: Sequence[str],
     *,
     directory: Path | None = None,
-    environment: Mapping[str, str] | None = None,
+    environment: Mapping[str, str],
 ) -> AsyncIterator[Codex]:
-    if environment is None:
-        environment = os.environ
     process = await asyncio.create_subprocess_exec(
         *command,
         "app-server",

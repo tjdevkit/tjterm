@@ -1,6 +1,5 @@
 import argparse
 import json
-import os
 import sqlite3
 import subprocess
 import sys
@@ -88,13 +87,15 @@ async def dispatch(
     request: sqlite3.Row,
     config: Path,
     profile: Path | None = None,
+    *,
+    environment: Mapping[str, str],
 ) -> None:
     if request["state"] != "offered":
         return
     identity = request["id"]
     row = item(db, request["item"])
     root = verify_tree(db, row)
-    async with connect(command) as codex:
+    async with connect(command, environment=environment) as codex:
         delivery = db.execute(
             "SELECT * FROM deliveries WHERE id=?", (identity,)
         ).fetchone()
@@ -109,7 +110,13 @@ async def dispatch(
                 )
             else:
                 lane = await select(
-                    db, identity, command, root, request["next_action"], config
+                    db,
+                    identity,
+                    command,
+                    root,
+                    request["next_action"],
+                    config,
+                    environment=environment,
                 )
                 opened = await codex.create(
                     root, lane.settings.model, effort=lane.settings.effort
@@ -358,6 +365,8 @@ async def accept_recipient(
     caller: str | None,
     ticket: str | None,
     profile: Path | None = None,
+    *,
+    environment: Mapping[str, str],
 ) -> None:
     identity = request["id"]
     if (
@@ -378,7 +387,7 @@ async def accept_recipient(
         raise TjenticError("This assignment is no longer open.")
     row = item(db, request["item"])
     root = verify_tree(db, row)
-    async with connect(command, directory=root) as codex:
+    async with connect(command, directory=root, environment=environment) as codex:
         receiver = await codex.find(UUID(caller), workflow=True)
     directory = receiver.directory.resolve()
     if worktree(directory) != root:
@@ -397,7 +406,7 @@ async def handoff(
     ticket: str | None,
     host: Host = Host.CODEX,
     *,
-    environment: Mapping[str, str] | None = None,
+    environment: Mapping[str, str],
 ) -> int:
     if not (args.retry or args.cancel or args.accept) and terminal is None:
         raise TjenticError("Run `tj handoff` in a Kitty terminal.")
@@ -423,7 +432,8 @@ async def handoff(
                         request,
                         caller,
                         ticket,
-                        Host.CODEX.profile(environment or {}),
+                        Host.CODEX.profile(environment),
+                        environment=environment,
                     )
                     print(f"Accepted {name}.\n\n{request['next_action']}")
                     return 0
@@ -436,14 +446,17 @@ async def handoff(
                 if existing is None:
                     if caller and host is Host.CODEX:
                         existing = await bind(
-                            db, name, UUID(caller), [], command or host.command()
+                            db,
+                            name,
+                            UUID(caller),
+                            [],
+                            command or host.command(),
+                            environment=environment,
                         )
                     else:
                         directory = Path.cwd().resolve()
                         if caller:
-                            sender = claude.saved_session(
-                                UUID(caller), environment or {}
-                            )
+                            sender = claude.saved_session(UUID(caller), environment)
                             if worktree(sender.directory) != root:
                                 raise TjenticError(
                                     "The sending session is in a different worktree."
@@ -489,7 +502,8 @@ async def handoff(
                             command or host.command(),
                             request,
                             config,
-                            host.profile(environment or {}),
+                            host.profile(environment),
+                            environment=environment,
                         )
                     elif legacy_tab:
                         print(f"The older recipient tab is still open for {name}.")
@@ -517,7 +531,7 @@ async def handoff(
                             config,
                             terminal,
                             host,
-                            os.environ if environment is None else environment,
+                            environment,
                         )
                         print(
                             f"Opened the recipient tab for {name}. "
@@ -537,7 +551,13 @@ async def handoff(
                 and result["action_delivery"]
                 and not item(db, result["item"])["hold"]
             ):
-                launch_assignment(db, state, result, command or host.command())
+                launch_assignment(
+                    db,
+                    state,
+                    result,
+                    command or host.command(),
+                    environment=environment,
+                )
             receipt = dict(result)
             receipt["item"] = name
             lane = db.execute(

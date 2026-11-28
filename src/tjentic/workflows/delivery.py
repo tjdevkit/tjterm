@@ -1,5 +1,5 @@
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from uuid import UUID
 
@@ -7,8 +7,14 @@ from tjentic.errors import TjenticError
 from tjentic.sessions.codex import Codex, ModelSettings, connect
 
 
-async def deliver(db: sqlite3.Connection, command: Sequence[str], delivery: str) -> str:
-    async with connect(command) as codex:
+async def deliver(
+    db: sqlite3.Connection,
+    command: Sequence[str],
+    delivery: str,
+    *,
+    environment: Mapping[str, str],
+) -> str:
+    async with connect(command, environment=environment) as codex:
         return await deliver_to(db, codex, delivery)
 
 

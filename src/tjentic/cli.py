@@ -4,7 +4,7 @@ import json
 import os
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from importlib.metadata import version
 from pathlib import Path
 from uuid import UUID
@@ -61,24 +61,32 @@ def _show(sessions: list[Session], json_output: bool) -> None:
 
 
 async def _lookup(
-    command: Sequence[str], args: argparse.Namespace, directory: Path
+    command: Sequence[str],
+    args: argparse.Namespace,
+    directory: Path,
+    environment: Mapping[str, str],
 ) -> list[Session]:
-    async with connect(command) as codex:
+    async with connect(command, environment=environment) as codex:
         if args.resume:
             return [await codex.find(args.resume)]
         scope = None if args.all else Workspace.discover(directory)
         return await codex.search(args.query or "", scope, args.limit or 20)
 
 
-def recover(args: argparse.Namespace, command: Sequence[str], directory: Path) -> int:
-    sessions = asyncio.run(_lookup(command, args, directory))
+def recover(
+    args: argparse.Namespace,
+    command: Sequence[str],
+    directory: Path,
+    environment: Mapping[str, str],
+) -> int:
+    sessions = asyncio.run(_lookup(command, args, directory, environment))
     if not args.resume:
         _show(sessions, args.json)
         return 0
     session = sessions[0]
     if not session.directory.is_dir():
         raise TjenticError(f"Recorded directory is missing: {session.directory}")
-    standards.verify(Host.CODEX, session.directory, os.environ)
+    standards.verify(Host.CODEX, session.directory, environment)
     # An independent native client must acquire Codex's exclusive thread writer lock.
     result = subprocess.run(
         [
@@ -90,6 +98,7 @@ def recover(args: argparse.Namespace, command: Sequence[str], directory: Path) -
             str(session.id),
         ],
         cwd=session.directory,
+        env=environment,
         check=False,
     )
     return result.returncode if result.returncode >= 0 else 128 - result.returncode
@@ -320,11 +329,14 @@ def main(
                         else (codex_command or Host.CODEX.command()),
                         workflow_state,
                         lanes,
+                        environment=os.environ,
                     )
                 )
             except sqlite3.Error as error:
                 raise TjenticError(str(error)) from error
-        return recover(args, codex_command or Host.CODEX.command(), Path.cwd())
+        return recover(
+            args, codex_command or Host.CODEX.command(), Path.cwd(), os.environ
+        )
     except (OSError, TjenticError) as error:
         print(f"tj: {_display(str(error))}", file=sys.stderr)
         return 1

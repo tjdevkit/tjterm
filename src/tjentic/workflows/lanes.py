@@ -1,6 +1,5 @@
 import hashlib
 import json
-import os
 import sqlite3
 import tomllib
 from collections.abc import Mapping, Sequence
@@ -163,7 +162,7 @@ async def select(
     config: Path,
     *,
     host: Host = Host.CODEX,
-    environment: Mapping[str, str] | None = None,
+    environment: Mapping[str, str],
 ) -> LaneDecision:
     source = hashlib.sha256(json.dumps([str(directory), task]).encode()).hexdigest()
     row = db.execute(
@@ -186,7 +185,7 @@ async def select(
             _SCHEMA,
             claude.Model(assessor.model),
             effort=assessor.effort,
-            environment=os.environ if environment is None else environment,
+            environment=environment,
         )
     else:
         async with codex.connect(

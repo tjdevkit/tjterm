@@ -2,7 +2,7 @@ import argparse
 import json
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pytest
@@ -247,8 +247,14 @@ def test_workflow_uses_the_available_lane_configuration(
     seen: list[Path] = []
 
     async def capture_configuration(
-        args: argparse.Namespace, command: Sequence[str], state: Path, config: Path
+        args: argparse.Namespace,
+        command: Sequence[str],
+        state: Path,
+        config: Path,
+        *,
+        environment: Mapping[str, str],
     ) -> int:
+        assert environment["XDG_CONFIG_HOME"] == str(tmp_path)
         seen.append(config)
         return 0
 

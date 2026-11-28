@@ -1,7 +1,7 @@
 import argparse
 import json
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -20,8 +20,10 @@ async def bind(
     thread: UUID,
     check: list[str],
     command: Sequence[str],
+    *,
+    environment: Mapping[str, str],
 ) -> sqlite3.Row:
-    async with connect(command) as codex:
+    async with connect(command, environment=environment) as codex:
         session = await codex.find(thread, workflow=True)
     directory = session.directory.resolve()
     root = worktree(directory)
@@ -96,12 +98,16 @@ async def _begin(
     args: argparse.Namespace,
     command: Sequence[str],
     config: Path,
+    *,
+    environment: Mapping[str, str],
 ) -> sqlite3.Row:
     name = args.item
     root = worktree(Path.cwd())
     if find_item(db, root, name) is not None:
         raise TjenticError(f"Item {name!r} already exists. Use workflow resume.")
-    lane = await select(db, "", command, root, args.task, config)
+    lane = await select(
+        db, "", command, root, args.task, config, environment=environment
+    )
     delivery = str(uuid4())
     prompt = (
         f"TJ implementation {delivery}\nItem: {name}\nWorktree: {root}\n"
@@ -111,7 +117,7 @@ async def _begin(
         f"reply exactly TJ IMPLEMENTED {delivery}. "
         "If blocked, explain what needs input."
     )
-    async with connect(command) as codex:
+    async with connect(command, environment=environment) as codex:
         opened = await codex.create(
             root, lane.settings.model, effort=lane.settings.effort
         )
@@ -132,7 +138,12 @@ async def _begin(
 
 
 async def _implemented(
-    db: sqlite3.Connection, row: sqlite3.Row, root: Path, command: Sequence[str]
+    db: sqlite3.Connection,
+    row: sqlite3.Row,
+    root: Path,
+    command: Sequence[str],
+    *,
+    environment: Mapping[str, str],
 ) -> None:
     name = row["id"]
     delivery = db.execute(
@@ -145,7 +156,7 @@ async def _implemented(
         # No turn was submitted and Codex may never have persisted that empty thread.
         key = "item:" + name
         lane = recorded(db, key)
-        async with connect(command) as codex:
+        async with connect(command, environment=environment) as codex:
             opened = await codex.create(
                 root, lane.settings.model, effort=lane.settings.effort
             )
@@ -158,7 +169,7 @@ async def _implemented(
                 )
             reply = await deliver_to(db, codex, identity, new_thread=True)
     else:
-        reply = await deliver(db, command, identity)
+        reply = await deliver(db, command, identity, environment=environment)
     hold = None
     if reply.strip() != f"TJ IMPLEMENTED {identity}":
         hold = reply.strip() or "The implementer did not report a completed change."
@@ -166,7 +177,13 @@ async def _implemented(
         db.execute("UPDATE items SET phase='check',hold=? WHERE id=?", (hold, name))
 
 
-async def advance(db: sqlite3.Connection, name: str, command: Sequence[str]) -> None:
+async def advance(
+    db: sqlite3.Connection,
+    name: str,
+    command: Sequence[str],
+    *,
+    environment: Mapping[str, str],
+) -> None:
     while True:
         row = item(db, name)
         if row["hold"] or row["phase"] in {"ready", "assigned", "closed"}:
@@ -177,14 +194,14 @@ async def advance(db: sqlite3.Connection, name: str, command: Sequence[str]) -> 
             )
         root = verify_tree(db, row)
         if row["phase"] == "implement":
-            await _implemented(db, row, root, command)
+            await _implemented(db, row, root, command, environment=environment)
             continue
         if row["phase"] == "check":
             run_check(db, row)
             continue
         check = latest_check(db, name)
         assert check is not None
-        reply = await deliver(db, command, check["delivery"])
+        reply = await deliver(db, command, check["delivery"], environment=environment)
         hold = None
         if check["exit_code"] == 0:
             phase = "ready"
@@ -262,7 +279,12 @@ def status(db: sqlite3.Connection, name: str) -> dict[str, object]:
 
 
 async def workflow(
-    args: argparse.Namespace, command: Sequence[str], state: Path, config: Path
+    args: argparse.Namespace,
+    command: Sequence[str],
+    state: Path,
+    config: Path,
+    *,
+    environment: Mapping[str, str],
 ) -> int:
     root = worktree(Path.cwd())
     with database(state) as db:
@@ -276,9 +298,16 @@ async def workflow(
             return 0
         with claim_item(state, root, args.item):
             if args.operation == "start":
-                row = await bind(db, args.item, args.thread, args.check, command)
+                row = await bind(
+                    db,
+                    args.item,
+                    args.thread,
+                    args.check,
+                    command,
+                    environment=environment,
+                )
             elif args.operation == "run":
-                row = await _begin(db, args, command, config)
+                row = await _begin(db, args, command, config, environment=environment)
             else:
                 existing = find_item(db, root, args.item)
                 if existing is None:
@@ -314,11 +343,11 @@ async def workflow(
                 (key, row["thread"]),
             ).fetchone()
             if active and not item(db, key)["hold"]:
-                launch_assignment(db, state, active, command)
+                launch_assignment(db, state, active, command, environment=environment)
                 print(json.dumps(status(db, key)))
                 return 0
             try:
-                await advance(db, key, command)
+                await advance(db, key, command, environment=environment)
             except (TjenticError, OSError, ValueError) as error:
                 with db:
                     db.execute(

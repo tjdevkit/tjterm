@@ -1,10 +1,11 @@
 """Run the accepted task in its receiver without occupying the sender's terminal."""
 
 import asyncio
+import os
 import sqlite3
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from tjentic.errors import TjenticError
@@ -14,7 +15,12 @@ from tjentic.workflows.store import claim, database, item
 
 
 def launch_assignment(
-    db: sqlite3.Connection, state: Path, row: sqlite3.Row, command: Sequence[str]
+    db: sqlite3.Connection,
+    state: Path,
+    row: sqlite3.Row,
+    command: Sequence[str],
+    *,
+    environment: Mapping[str, str],
 ) -> None:
     action = db.execute(
         "SELECT state FROM deliveries WHERE id=?", (row["action_delivery"],)
@@ -30,6 +36,7 @@ def launch_assignment(
             row["id"],
             *command,
         ],
+        env=environment,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -37,7 +44,13 @@ def launch_assignment(
     )
 
 
-async def execute(state: Path, identity: str, command: Sequence[str]) -> None:
+async def execute(
+    state: Path,
+    identity: str,
+    command: Sequence[str],
+    *,
+    environment: Mapping[str, str],
+) -> None:
     with database(state) as db:
         row = db.execute(
             "SELECT * FROM transfers WHERE id=? AND state='accepted'", (identity,)
@@ -52,7 +65,9 @@ async def execute(state: Path, identity: str, command: Sequence[str]) -> None:
                 if owner["hold"]:
                     return
                 verify_tree(db, owner)
-                await deliver(db, command, row["action_delivery"])
+                await deliver(
+                    db, command, row["action_delivery"], environment=environment
+                )
             except (TjenticError, OSError, ValueError) as error:
                 with db:
                     db.execute(
@@ -69,7 +84,7 @@ async def execute(state: Path, identity: str, command: Sequence[str]) -> None:
 def main() -> int:
     state, identity, *command = sys.argv[1:]
     try:
-        asyncio.run(execute(Path(state), identity, command))
+        asyncio.run(execute(Path(state), identity, command, environment=os.environ))
     except (TjenticError, OSError, ValueError, sqlite3.Error):
         return 1
     return 0
