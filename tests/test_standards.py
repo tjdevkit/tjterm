@@ -71,13 +71,15 @@ def test_native_selection_from_linked_checkout_preserves_instruction_files(
         )
         child = directory / "listener"
         child.mkdir()
+        instructions = directory / "AGENTS.md"
+        original = instructions.read_bytes()
         monkeypatch.chdir(child)
         for host in ("codex", "claude"):
             assert main(["plugins", "update", "--dry-run", "--host", host]) == 0
             assert "rust@tjentic-project" in capsys.readouterr().out
-        assert (directory / "AGENTS.md").read_bytes() == notes
-        (directory / "AGENTS.md").write_bytes(
-            notes + b"<!-- tjentic:standards:start -->\nold rules\n"
+        assert instructions.read_bytes() == original
+        instructions.write_bytes(
+            original + b"<!-- tjentic:standards:start -->\nold rules\n"
             b"<!-- tjentic:standards:end -->\n"
         )
         assert main(["plugins", "check", "--host", "codex"]) == 1
