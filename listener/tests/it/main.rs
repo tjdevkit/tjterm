@@ -224,3 +224,73 @@ fn a_forge_outage_preserves_the_wait_and_a_successful_read_clears_the_error() {
         .unwrap();
     assert_eq!(error, None);
 }
+
+#[test]
+fn rejected_codex_wake_leaves_the_notice_pending_without_queueing() {
+    use std::{env, fs, process::Command};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let state = tmp.path().join("state");
+    let bin = tmp.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let codex = bin.join(format!("codex{}", env::consts::EXE_SUFFIX));
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/it/fixtures/codex.rs");
+    assert!(
+        Command::new("rustc")
+            .arg(fixture)
+            .arg("-o")
+            .arg(&codex)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let profile = tmp.path().to_str().unwrap();
+    let wait = {
+        let mut store = Store::open(&state).unwrap();
+        let wait = store
+            .bind(&Binding {
+                profile,
+                ..binding("codex")
+            })
+            .unwrap();
+        store.observe(&wait, &links("CLOSED", SHA, 1)).unwrap();
+        wait
+    };
+    let calls = tmp.path().join("calls");
+    let output = Command::new(env!("CARGO_BIN_EXE_tj-listener"))
+        .env("PATH", &bin)
+        .env("TJ_FIXTURE_CALLS", &calls)
+        .arg("--state")
+        .arg(&state)
+        .arg("--python")
+        .arg(&codex)
+        .args([
+            "watch",
+            "--host",
+            "codex",
+            "--profile",
+            profile,
+            "--thread",
+            THREAD,
+            "--once",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("fixture rejected missing project standards")
+    );
+    assert_eq!(
+        fs::read_to_string(calls).unwrap(),
+        format!(
+            "app-server daemon start\n-I -m tjentic.watch.preflight {} {} {THREAD}\n",
+            state.display(),
+            wait.item
+        )
+    );
+    let receipt: String = sql(&state)
+        .query_row("SELECT delivery FROM pr_decisions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(receipt, "pending");
+}
