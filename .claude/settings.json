@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "python@tjentic-project": true,
+    "rust@tjentic-project": true
+  }
+}

@@ -9,17 +9,22 @@ from tjentic.errors import TjenticError
 
 
 class Host(StrEnum):
-    CODEX = "codex"
-    CLAUDE = "claude"
+    CODEX = ("codex", "Codex", "CODEX_THREAD_ID", "CODEX_HOME")
+    CLAUDE = ("claude", "Claude Code", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR")
 
-    @property
-    def session_variable(self) -> str:
-        return "CODEX_THREAD_ID" if self is Host.CODEX else "CLAUDE_CODE_SESSION_ID"
+    session_variable: str
+    profile_variable: str
+    provider: str
+
+    def __new__(cls, value: str, *metadata: str) -> Self:
+        member = str.__new__(cls, value)
+        member._value_ = value
+        member.provider, member.session_variable, member.profile_variable = metadata
+        return member
 
     def profile(self, environment: Mapping[str, str]) -> Path:
-        key = "CLAUDE_CONFIG_DIR" if self is Host.CLAUDE else "CODEX_HOME"
         return (
-            Path(environment.get(key) or Path.home() / f".{self}")
+            Path(environment.get(self.profile_variable) or Path.home() / f".{self}")
             .expanduser()
             .resolve()
         )
@@ -41,8 +46,7 @@ class Host(StrEnum):
             f"{self.value}.exe" if os.name == "nt" else self.value
         )
         if executable is None:
-            provider = "Claude Code" if self is Host.CLAUDE else "Codex"
             raise TjenticError(
-                f"Install the native {provider} CLI and make it available on PATH."
+                f"Install the native {self.provider} CLI and make it available on PATH."
             )
         return [str(Path(executable).resolve())]

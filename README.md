@@ -99,29 +99,17 @@ From the shell use `--host claude` to select Claude Code. See the recipient and
 lane with `tj workflow status ITEM` in the item's worktree. If the recipient
 closes before receiving the task, use `tj handoff --retry TRANSFER_ID`.
 
-## Synchronize project standards
+## Set up contributor plugins
 
-Add `.tjentic/standards.toml` to your Git worktree and select the Markdown files your team wants in its native agent instructions. Pin each source to a full Git commit. Sources can be HTTPS Git URLs or local checkout paths.
-
-```toml
-[[standards]]
-source = "https://github.com/tjentic/python-standards.git"
-revision = "8a3bf5a435227cfbc681d20e4a0286e7d8d30887"
-files = ["standards/convention/enums.md"]
-
-[[standards]]
-source = "https://github.com/tjentic/rust-standards.git"
-revision = "05374eac81ce4bfffbe89fb71deaf12fcfdde2c3"
-scope = "crates"
-files = ["standards/convention/domain-design.md"]
-```
-
-Omit `scope` for the worktree root. Give each scoped entry an existing directory in the worktree. Select a short set of rules so both clients have room for the project's own instructions.
+From the checkout you plan to work in, install its selected plugins for your host.
 
 ```sh
-tj plugins update
+tj plugins update --host codex
+tj plugins check --host codex
 ```
 
-The command updates a marked section in each selected `AGENTS.md`. Add `--dry-run` to see a unified diff before writing. Review and commit the file and manifest together so teammates can use the text with their normal agent commands. Update a pin or file list and run sync again to refresh the section. Removing an entry clears its old section in tracked or unignored instruction files. An explicit empty `files` list can clear an ignored target while its scope is still selected.
+For Claude Code, use `--host claude`. Use `--dry-run` with `update` to see the selected commits. In Codex, review the plugin commands through the native hook trust prompt or `/hooks`. Start a new session or resume the intended one after installation. Each plugin supplies its own conventions through its native `SessionStart` hooks.
 
-Codex loads the section according to its usual scope and gives `AGENTS.override.md` precedence. Claude Code can use the same file through native discovery, an existing `CLAUDE.md` → `AGENTS.md` symlink, or a local `@AGENTS.md` import in a separately authored `CLAUDE.md`. Start in the relevant subtree when you need its rules on the first turn.
+Both hosts use the project marketplace in `.claude-plugin/marketplace.json`. It records each upstream source and commit once. The host settings in `.codex/config.toml` and `.claude/settings.json` enable the selected IDs in this checkout. The check inspects the installed revisions and native startup hook configuration.
+
+Projects using the older Markdown updater should remove its delimited section from their instruction files when adopting these plugins. Keep handwritten instructions around that section. The old `.tjentic/standards.toml` selected individual documents. A language plugin delivers the convention set maintained by its publisher.
