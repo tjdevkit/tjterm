@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import sqlite3
 import tomllib
 from collections.abc import Mapping, Sequence
@@ -185,10 +186,12 @@ async def select(
             _SCHEMA,
             claude.Model(assessor.model),
             effort=assessor.effort,
-            environment=environment or {},
+            environment=os.environ if environment is None else environment,
         )
     else:
-        async with codex.connect(command, directory=directory) as client:
+        async with codex.connect(
+            command, directory=directory, environment=environment
+        ) as client:
             answer = await client.assess(
                 command,
                 directory,

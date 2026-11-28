@@ -8,6 +8,7 @@ from enum import StrEnum
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from tjentic import standards
 from tjentic.errors import TjenticError
 from tjentic.sessions.hosts import Host
 from tjentic.watch.native import Watch
@@ -47,13 +48,16 @@ def launch(
     *,
     watch: Watch | None = None,
 ) -> int:
+    directory = Path.cwd()
+    standards.verify(Host.CLAUDE, directory, environment)
     identity = session_id or uuid4()
     result = subprocess.run(
         [
             *command,
             *arguments(identity, resume=session_id is not None),
-            *(watch.claude_config(Path.cwd(), identity) if watch else []),
+            *(watch.claude_config(directory, identity) if watch else []),
         ],
+        cwd=directory,
         env={
             **environment,
             "TJ_HOST": Host.CLAUDE,
@@ -104,6 +108,7 @@ async def assess(
     effort: str,
     environment: Mapping[str, str],
 ) -> str:
+    await asyncio.to_thread(standards.verify, Host.CLAUDE, directory, environment)
     process = await asyncio.create_subprocess_exec(
         *command,
         "-p",

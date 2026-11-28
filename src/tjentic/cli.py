@@ -78,6 +78,7 @@ def recover(args: argparse.Namespace, command: Sequence[str], directory: Path) -
     session = sessions[0]
     if not session.directory.is_dir():
         raise TjenticError(f"Recorded directory is missing: {session.directory}")
+    standards.verify(Host.CODEX, session.directory, os.environ)
     # An independent native client must acquire Codex's exclusive thread writer lock.
     result = subprocess.run(
         [
@@ -205,9 +206,7 @@ def main(
             )
     try:
         if args.command == "plugins":
-            standards.run_sync(
-                Path.cwd(), apply=not args.dry_run, environment=os.environ
-            )
+            standards.run(args, Path.cwd(), os.environ)
             return 0
         if os.name == "nt":
             state = os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local"

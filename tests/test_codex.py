@@ -12,7 +12,7 @@ from tjentic.sessions.codex import Codex, Model, Session, receipt
 def test_create_resolves_current_release_in_each_family(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    client = Codex(MagicMock(), MagicMock())
+    client = Codex(MagicMock(), MagicMock(), {})
     families = [
         (Model.SOL, "gpt-6.10-sol"),
         (Model.ASTRA, "gpt-6.10-astra"),

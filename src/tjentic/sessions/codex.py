@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Self
 from uuid import UUID
 
+from tjentic import standards
 from tjentic.errors import TjenticError
 from tjentic.sessions.hosts import Host
 from tjentic.watch.native import Watch
@@ -131,7 +133,13 @@ def receipt(turns: list[object], prompt: str) -> str | None:
 class Codex:
     """Query saved conversations through the local Codex app server."""
 
-    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    def __init__(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        environment: Mapping[str, str],
+    ):
+        self.environment = environment
         self.reader = reader
         self.writer = writer
         self.request_id = 0
@@ -271,6 +279,9 @@ class Codex:
     async def create(
         self, directory: Path, model: Model | str, *, effort: str
     ) -> OpenedSession:
+        await asyncio.to_thread(
+            standards.verify, Host.CODEX, directory, self.environment
+        )
         settings = ModelSettings(await self._model(model), effort)
         result = await self.request(
             "thread/start",
@@ -340,6 +351,9 @@ class Codex:
         *,
         effort: str,
     ) -> str:
+        await asyncio.to_thread(
+            standards.verify, Host.CODEX, directory, self.environment
+        )
         model = await self._model(model)
         with tempfile.TemporaryDirectory(prefix="tj-assessment-") as temp:
             path = Path(temp)
@@ -366,6 +380,7 @@ class Codex:
                     str(result),
                     "-",
                     cwd=directory,
+                    env=self.environment,
                     stdin=subprocess.PIPE,
                     stdout=subprocess.DEVNULL,
                     stderr=stderr,
@@ -393,6 +408,9 @@ class Codex:
             raise TjenticError(
                 f"Codex session {identity} has a different or missing directory."
             )
+        await asyncio.to_thread(
+            standards.verify, Host.CODEX, directory, self.environment
+        )
         result = await self.request(
             "thread/resume",
             {"threadId": str(identity), "cwd": str(directory), "excludeTurns": True},
@@ -461,11 +479,17 @@ class Codex:
 
 @asynccontextmanager
 async def connect(
-    command: Sequence[str], *, directory: Path | None = None
+    command: Sequence[str],
+    *,
+    directory: Path | None = None,
+    environment: Mapping[str, str] | None = None,
 ) -> AsyncIterator[Codex]:
+    if environment is None:
+        environment = os.environ
     process = await asyncio.create_subprocess_exec(
         *command,
         "app-server",
+        env=environment,
         cwd=directory,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -473,7 +497,7 @@ async def connect(
         limit=32 * 1024 * 1024,
     )
     assert process.stdout is not None and process.stdin is not None
-    client = Codex(process.stdout, process.stdin)
+    client = Codex(process.stdout, process.stdin, environment)
     try:
         await client.request(
             "initialize",
@@ -515,7 +539,7 @@ async def terminal(
     watch: Watch | None = None,
 ) -> int:
     directory = Path.cwd()
-    async with connect(command) as codex:
+    async with connect(command, environment=environment) as codex:
         if identity is not None:
             directory = (await codex.find(identity, workflow=True)).directory
             # Codex can replay the original startup instructions on exact resume.
@@ -545,6 +569,9 @@ async def terminal(
                 )
             args = ["resume"]
         else:
+            await asyncio.to_thread(
+                standards.verify, Host.CODEX, directory, environment
+            )
             response = await codex.request("config/read", {"cwd": str(directory)})
             config = response.get("config")
             if not isinstance(config, dict):

@@ -102,6 +102,21 @@ def test_handoff_assigns_once_and_opens_the_recipient_with_the_task(
         pending = transfer(db, identity)
         assert pending["state"] == "offered"
         assert not item(db, pending["item"])["thread"]
+    if fail_first:
+        # Kitty's own environment and working directory can differ from the sender's.
+        selection = repo / ".tjentic" / "standards.toml"
+        selection.parent.mkdir()
+        selection.write_text("", encoding="utf-8")
+        with monkeypatch.context() as child:
+            child.chdir(tmp_path)
+            with pytest.raises(TjenticError, match=r"standards\.toml"):
+                run_recipient(state, identity, ["must-not-run"], {})
+        with database(state) as db:
+            pending = transfer(db, identity)
+            assert pending["state"] == "offered"
+            assert not item(db, pending["item"])["thread"]
+        selection.unlink()
+        asyncio.run(handoff(args, ["codex"], state, None, config, terminal, None))
     with pytest.raises(TjenticError, match="closed before submitting"):
         run_recipient(
             state, identity, [sys.executable, "-c", "raise SystemExit(1)"], {}

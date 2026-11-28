@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from tjentic.cli import main
+from tjentic.watch.native import Watch
 from tjentic.workflows import runner
 from tjentic.workflows.runner import bind_worktree
 from tjentic.workflows.store import database
@@ -154,6 +155,42 @@ def test_resume_hands_exact_id_and_directory_to_native_writer(tmp_path: Path) ->
         "argv": ["resume", "--no-daemon", "--cd", str(recorded), FIRST],
         "cwd": str(recorded),
     }
+
+
+@pytest.mark.allow_hosts(["127.0.0.1"])
+@pytest.mark.parametrize(
+    ("command", "resume"), [("codex", False), ("codex", True), ("recover", True)]
+)
+def test_native_launch_checks_its_checkout_before_acquiring_a_writer(
+    command: str,
+    resume: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    recorded = tmp_path / "saved"
+    subprocess.run(["git", "init", "-q", str(recorded)], check=True)
+    (recorded / ".tjentic").mkdir()
+    (recorded / ".tjentic" / "standards.toml").write_text("", encoding="utf-8")
+    scenario = tmp_path / "resume.json"
+    scenario.write_text(
+        json.dumps({"pages": [[thread(FIRST, recorded)]]}), encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path if resume else recorded)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setattr(Watch, "call", lambda *_args: "")
+    assert (
+        main(
+            [command, *(["--resume", FIRST] if resume else [])],
+            codex_command=[sys.executable, str(FAKE), str(scenario)],
+        )
+        == 1
+    )
+    assert ".tjentic/standards.toml" in capsys.readouterr().err
+    expected = {"initialize", "initialized"}
+    if resume:
+        expected.add("thread/list")
+    assert {row["method"] for row in messages(scenario)} == expected
 
 
 @pytest.mark.parametrize(

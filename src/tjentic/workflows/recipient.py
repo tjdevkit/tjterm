@@ -7,6 +7,7 @@ import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from tjentic import standards
 from tjentic.errors import TjenticError
 from tjentic.sessions.history import SubmittedPrompt
 from tjentic.sessions.hosts import Host
@@ -44,6 +45,7 @@ def run(
         if provider is Host.CLAUDE:
             env[provider.session_variable] = request["receiver"]
         try:
+            standards.verify(provider, directory, env)
             submitted = prompt.visible()
             # A previous launch can leave a valid receipt before TJ could record it.
             argv = command[:-2] if submitted else command

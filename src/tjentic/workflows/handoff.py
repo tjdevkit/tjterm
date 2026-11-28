@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -240,7 +241,7 @@ async def open_recipient(
             assignment,
         ]
     else:
-        async with connect(command, directory=root) as codex:
+        async with connect(command, directory=root, environment=environment) as codex:
             if target:
                 receiver = await codex.find(UUID(target), workflow=True)
                 directory = receiver.directory.resolve()
@@ -516,7 +517,7 @@ async def handoff(
                             config,
                             terminal,
                             host,
-                            environment or {},
+                            os.environ if environment is None else environment,
                         )
                         print(
                             f"Opened the recipient tab for {name}. "
