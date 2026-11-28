@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from tjentic.cli import main
-from tjentic.sessions.hosts import Host
+from tjentic.hosts.host import Host
 
 
 @pytest.mark.parametrize("host", list(Host))

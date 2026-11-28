@@ -4,9 +4,9 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from tjentic.errors import TjenticError
+from tjentic.hosts.host import Host
 from tjentic.plugins.catalog import Catalog, ReadFile, read_file
-from tjentic.sessions.hosts import Host
-from tjentic.startup import (
+from tjentic.plugins.startup import (
     Installation,
     StartupError,
     as_object,

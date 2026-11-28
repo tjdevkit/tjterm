@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Self
 
 from tjentic.errors import TjenticError
+from tjentic.hosts.host import Host
 from tjentic.plugins.catalog import Catalog, ReadFile, read_file
-from tjentic.sessions.hosts import Host
 
 type Select = Callable[[Catalog, Path, ReadFile], list[str]]
 

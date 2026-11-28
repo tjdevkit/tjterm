@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 
 from tjentic.errors import TjenticError
-from tjentic.plugins import codex
-from tjentic.sessions.hosts import Host
+from tjentic.hosts.codex import plugins as codex
+from tjentic.hosts.codex.server import codex_server
+from tjentic.hosts.host import Host
 from tjentic.standards import verify
-from tjentic.startup import codex_server
 
 IDENTITY = "rust@project"
 

@@ -7,7 +7,7 @@ import pytest
 
 from tjentic.cli import main
 from tjentic.errors import TjenticError
-from tjentic.sessions.hosts import Host
+from tjentic.hosts.host import Host
 from tjentic.standards import verify
 
 
