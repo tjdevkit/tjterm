@@ -1,7 +1,6 @@
 import json
 import subprocess
 import tomllib
-from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -174,23 +173,46 @@ def check_startup(
         hooks = _codex_hooks(client, directory)
     for identity in plugins:
         selected = _for_plugin(hooks, identity)
+        if not selected:
+            raise StartupError(
+                f"Codex is missing {identity} SessionStart hooks for {directory}. "
+                "Check project trust and plugin enablement in Codex, "
+                "then run tj plugins update --host codex."
+            )
         install = require_revision(
             identity,
             _codex_installation(selected, identity),
             catalog.revisions[identity],
         )
-        commands = install.startup_commands()
-        expected = Counter(
-            command.replace("${CLAUDE_PLUGIN_ROOT}", str(install.root)).replace(
-                "${PLUGIN_ROOT}", str(install.root)
-            )
-            for command in commands
+        install.check_commands(
+            identity, (str(hook.get("command")) for hook in selected), expand_root=True
         )
-        actual = Counter(str(hook.get("command")) for hook in selected)
-        if actual != expected:
-            raise StartupError(
-                f"Incomplete Codex SessionStart registration for {identity}."
-            )
+        # Trusted aliases of the same Git package each run their own hooks.
+        commands = {
+            str(hook.get("command")).replace(str(install.root), "") for hook in selected
+        }
+        aliases = {
+            other
+            for hook in hooks
+            if hook.get("enabled") is True
+            and hook.get("trustStatus") in ("trusted", "managed")
+            and isinstance(other := hook.get("pluginId"), str)
+            and isinstance(source := hook.get("sourcePath"), str)
+            and str(hook.get("command")).replace(str(Path(source).parent.parent), "")
+            in commands
+            and other != identity
+        }
+        for other in aliases:
+            candidates = _for_plugin(hooks, other)
+            if candidates:
+                path = candidates[0].get("sourcePath")
+                if (
+                    isinstance(path, str)
+                    and (Path(path).parent.parent / ".git").exists()
+                ):
+                    install.check_alias(
+                        identity, other, _codex_installation(candidates, other)
+                    )
         for hook in selected:
             if hook.get("enabled") is not True or hook.get("trustStatus") not in (
                 "trusted",

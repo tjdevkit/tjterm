@@ -1,8 +1,11 @@
 """Inspect the native host's startup registration without running its hooks."""
 
+from __future__ import annotations
+
 import json
 import subprocess
-from collections.abc import Iterator, Mapping
+from collections import Counter
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -126,6 +129,31 @@ class Installation:
         if not commands:
             raise StartupError(f"No SessionStart commands in {manifest}.")
         return commands
+
+    def check_commands(
+        self, identity: str, actual: Iterable[str], *, expand_root: bool = False
+    ) -> None:
+        expected = self.startup_commands()
+        if expand_root:
+            expected = [
+                command.replace("${CLAUDE_PLUGIN_ROOT}", str(self.root)).replace(
+                    "${PLUGIN_ROOT}", str(self.root)
+                )
+                for command in expected
+            ]
+        if Counter(expected) != Counter(actual):
+            raise StartupError(
+                f"Incomplete native SessionStart registration for {identity}."
+            )
+
+    def check_alias(
+        self, identity: str, other: str, installation: Installation | None
+    ) -> None:
+        if installation is not None and installation.revision == self.revision:
+            raise StartupError(
+                f"{identity} and {other} both register the same standards revision. "
+                f"Disable the duplicate plugin {other} in this checkout."
+            )
 
 
 def require_revision(

@@ -101,6 +101,8 @@ def codex_fixture(
     ]
     if mode == "partial":
         rows.pop()
+    if mode == "alias":
+        rows.extend([{**row, "pluginId": "legacy@other"} for row in rows])
     source = checkout.parent / "codex.py"
     source.write_text(
         "import json, sys\n"
@@ -133,6 +135,7 @@ def codex_fixture(
         ("disabled", "disabled"),
         ("partial", "Incomplete"),
         ("off", "Enable"),
+        ("alias", "both register"),
     ],
 )
 def test_check_startup_rejects_inactive_codex_hooks(
@@ -162,6 +165,7 @@ def claude_fixture(
     checkout: Path,
     monkeypatch: pytest.MonkeyPatch,
     projects: list[Path],
+    policy: str = "enabled",
 ) -> None:
     plugin = checkout.parent / "plugin"
     rows = [
@@ -190,28 +194,59 @@ def claude_fixture(
             },
         },
     )
+    modes: dict[str, dict[str, object]] = {
+        "get_hooks_listing": {
+            "hooks": [
+                {
+                    "source": "pluginHook",
+                    "event": "SessionStart",
+                    "type": "command",
+                    "pluginName": IDENTITY,
+                    "matcher": "",
+                    "commandText": word,
+                }
+                for word in ("first", "second")
+            ],
+            "policy": {
+                "allDisabled": policy == "allDisabled",
+                "managedOnly": policy == "managedOnly",
+                "disabledByPolicy": False,
+            },
+        },
+        "get_settings": {"sources": []},
+    }
+    if policy == "partial":
+        modes["get_hooks_listing"]["hooks"] = []
     source = checkout.parent / "claude.py"
     source.write_text(
         "import sys,json\n"
         "if '--bare' in sys.argv:\n"
         " request = json.loads(sys.stdin.readline())\n"
-        f" policy={{'allDisabled': {policy == 'allDisabled'}, 'managedOnly': {policy == 'managedOnly'}, 'disabledByPolicy':False}}\n"
-        " result={'policy':policy} if request['request']['subtype']=='get_hooks_listing' else {'sources':[]}\n"
-        " print(json.dumps({'type':'control_response', 'response':{'request_id':'tj','subtype':'success','response':result}}))\n"
+        f" result={modes!r}[request['request']['subtype']]\n"
+        " response={'request_id':'tj','subtype':'success','response':result}\n"
+        " print(json.dumps({'type':'control_response','response':response}))\n"
         f"else: print({json.dumps(rows)!r})\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(Host, "command", lambda host: [sys.executable, str(source)])
 
 
-@pytest.mark.parametrize("setting", ["allDisabled", "managedOnly"])
+@pytest.mark.parametrize(
+    ("setting", "message"),
+    [
+        ("allDisabled", "restrict"),
+        ("managedOnly", "restrict"),
+        ("partial", "Incomplete"),
+    ],
+)
 def test_check_startup_blocks_restricted_claude_hooks(
     checkout: Path,
     monkeypatch: pytest.MonkeyPatch,
     setting: str,
+    message: str,
 ) -> None:
     claude_fixture(checkout, monkeypatch, [checkout], setting)
-    with pytest.raises(TjenticError, match="restrict"):
+    with pytest.raises(TjenticError, match=message):
         verify(Host.CLAUDE, checkout, environment(checkout))
 
 
@@ -236,3 +271,13 @@ def test_check_startup_matches_exact_linked_claude_installation(
     git(checkout, "worktree", "add", "--detach", str(linked))
     claude_fixture(linked, monkeypatch, [checkout, linked])
     verify(Host.CLAUDE, linked, environment(linked))
+
+
+def test_check_startup_rejects_modified_codex_package(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    codex_fixture(checkout, monkeypatch, "trusted")
+    manifest = checkout.parent / "plugin" / "hooks" / "hooks.json"
+    manifest.write_text("{}", encoding="utf-8")
+    with pytest.raises(TjenticError, match="differ from its Git revision"):
+        verify(Host.CODEX, checkout, environment(checkout))
